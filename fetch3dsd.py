@@ -55,7 +55,7 @@ def walk(node, base, M):
     for c in kids: jobs += walk(c, base, M)
     return jobs
 
-with cf.ThreadPoolExecutor(4) as ex:
+with cf.ThreadPoolExecutor(int(os.environ.get('ZIP_THREADS', 4))) as ex:
     todo = [('json', ROOT, I)]
     while todo:
         js = [j for j in todo if j[0] == 'json']; lf = [j for j in todo if j[0] == 'leaf']; todo = []

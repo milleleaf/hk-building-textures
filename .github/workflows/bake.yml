@@ -22,6 +22,22 @@ on:
         description: 'Rebuild sheets that are already published (after a converter fix)'
         type: boolean
         default: false
+      max_parallel:
+        description: 'Jobs at once (Lands D: 100 concurrent users)'
+        default: '10'
+      threads:
+        description: 'Lands D requests at once per job'
+        default: '4'
+      span_mb:
+        description: 'MB per Range request'
+        default: '32'
+      pause_s:
+        description: 'Seconds of pause after each request'
+        default: '0'
+      stop_on_403:
+        description: 'At the first Lands D 403, stop: leave stop/landsd-403.json on the bucket, start no further sheet'
+        type: boolean
+        default: true
 permissions:
   contents: read
 concurrency:
@@ -60,7 +76,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     strategy:
-      max-parallel: 10
+      max-parallel: ${{ fromJSON(inputs.max_parallel) }}
       fail-fast: false
       matrix:
         job: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -97,9 +113,16 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=12288
           PRODUCT: ${{ inputs.product }}
           SHEETS: ${{ matrix.job.sheets }}
+          ZIP_THREADS: ${{ inputs.threads }}
+          ZIP_SPAN_MB: ${{ inputs.span_mb }}
+          ZIP_PAUSE_S: ${{ inputs.pause_s }}
+          STOP_ON_403: ${{ inputs.stop_on_403 && '1' || '0' }}
         run: |
           failed=0
           for s in $SHEETS; do
+            # a Lands D 403 anywhere in the run (or before it) stops every job before its next sheet; delete the marker to go on
+            code=$(curl -s -o /dev/null -w '%{http_code}' -L https://huggingface.co/buckets/milleleaf/hk-building-textures/resolve/stop/landsd-403.json)
+            if [ "$code" = 200 ]; then echo "stop marker stop/landsd-403.json on the bucket: not starting $s"; failed=1; break; fi
             python sheet.py "$PRODUCT" "$WORK" "$s" || failed=1
             df -h /mnt | tail -1
           done

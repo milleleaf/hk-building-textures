@@ -13,8 +13,27 @@ import io, json, math, os, struct, sys, time, zipfile, zlib, urllib.request, con
 
 KEY = 'ad5940a63bd344c48b0351ef1c7a905e'   # Lands D's public key, published on the CSDI dataset records
 UA = {'User-Agent': 'milleleaf-hk-building-textures'}
-SPAN, GAP, TRIES = 32 << 20, 1 << 20, 16               # one request covers members up to 32 MB in all, bridging gaps under 1 MB
-fetched = {'requests': 0, 'bytes': 0}
+# Fetch settings (environment, recorded in the report): requests at once, MB per Range request (members bridged across gaps
+# under 1 MB), seconds of pause after each request per thread; STOP_ON_403=1 gives up at the first 403 and leaves a stop marker
+# on the bucket (stop/landsd-403.json) so no job starts another sheet (the bake workflow checks it).
+THREADS = int(os.environ.get('ZIP_THREADS', 4)); SPAN = int(float(os.environ.get('ZIP_SPAN_MB', 32)) * (1 << 20)); GAP, TRIES = 1 << 20, 16
+PAUSE = float(os.environ.get('ZIP_PAUSE_S', 0)); STOP = os.environ.get('STOP_ON_403') == '1'
+fetched = {'requests': 0, 'bytes': 0, 'http403': 0, 'first_403_utc': None, 'MB_before_403': None}
+SETTINGS = {'threads': THREADS, 'span_MB': SPAN / (1 << 20), 'pause_s': PAUSE, 'stop_on_403': STOP}
+
+class Blocked(Exception): pass
+
+def saw403(url):
+    fetched['http403'] += 1
+    if fetched['first_403_utc'] is None:
+        fetched['first_403_utc'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()); fetched['MB_before_403'] = round(fetched['bytes'] / 1e6, 1)
+    if STOP:
+        try:
+            from huggingface_hub import batch_bucket_files
+            batch_bucket_files('milleleaf/hk-building-textures', add=[(json.dumps({'url': url.split('?')[0], **fetched, 'settings': SETTINGS,
+                               'job': os.environ.get('GITHUB_JOB'), 'run': os.environ.get('GITHUB_RUN_ID')}).encode(), 'stop/landsd-403.json')])
+        except Exception as e: print(f'  could not write the stop marker: {e!r}', file=sys.stderr)
+        raise Blocked(f'403 from Lands D at {fetched["first_403_utc"]} after {fetched["MB_before_403"]} MB: stopping (STOP_ON_403=1)')
 
 def rng(url, start, end):   # inclusive
     req = urllib.request.Request(url, headers={'Range': f'bytes={start}-{end}', **UA})
@@ -24,9 +43,12 @@ def rng(url, start, end):   # inclusive
             if r.status != 206: raise RuntimeError(f'no range support: HTTP {r.status}')
             b = r.read()
             if len(b) != end - start + 1: raise IOError(f'short read {len(b)} of {end - start + 1}')
-            fetched['requests'] += 1; fetched['bytes'] += len(b); return b
-        except RuntimeError: raise
+            fetched['requests'] += 1; fetched['bytes'] += len(b)
+            if PAUSE: time.sleep(PAUSE)
+            return b
+        except (RuntimeError, Blocked): raise
         except Exception as e:
+            if getattr(e, 'code', None) == 403: saw403(url)
             if i == TRIES - 1: raise
             backoff(i, e)
 
@@ -42,7 +64,9 @@ def backoff(i, e):
 def head(url):
     for i in range(TRIES):
         try: return int(urllib.request.urlopen(urllib.request.Request(url, method='HEAD', headers=UA), timeout=60).headers['Content-Length'])
+        except Blocked: raise
         except Exception as e:
+            if getattr(e, 'code', None) == 403: saw403(url)
             if i == TRIES - 1: raise
             backoff(i, e)
 
@@ -87,7 +111,7 @@ def fetch(url, z, size, names, out):
             f = os.path.join(out, zi.filename); os.makedirs(os.path.dirname(f), exist_ok=True)
             data = member(buf, zi.header_offset - s['start'], zi); open(f + '.part', 'wb').write(data); os.replace(f + '.part', f); n += len(data)
         return n
-    with cf.ThreadPoolExecutor(4) as ex: return sum(ex.map(get, spans))
+    with cf.ThreadPoolExecutor(THREADS) as ex: return sum(ex.map(get, spans))
 
 def near_filter(fp_file, pad):
     """wanted(centre ECEF, radius): the leaf sphere comes within pad m (xy) of a building's bbox"""
@@ -157,8 +181,18 @@ def main(a):
         report[sheet] = {'zip_MB': round(rf.size / 1e6, 1), 'members': len(names), 'fetched_members': len(pick), 'MB': round(got / 1e6, 1),
                          'downloaded_MB': round((fetched['bytes'] - n0['bytes']) / 1e6, 1), 'requests': fetched['requests'] - n0['requests'], **r}
         print(sheet, report[sheet], flush=True)
-    json.dump(report, open(os.path.join(out, f'zipcut-{kind}.json'), 'w'), indent=1)
+    return report
+
+def run(a):
+    """main(), writing <out>/zipcut-<kind>.json {fetch: settings + totals + 403s, sheets: {...}} also when it fails"""
+    flags = {'--prefix', '--near', '--pad'}; pos = [x for i, x in enumerate(a) if x not in flags and (i == 0 or a[i - 1] not in flags)]
+    os.makedirs(pos[1], exist_ok=True); report, err = {}, None
+    try: report = main(a)
+    except Exception as e: err = repr(e); raise
+    finally:
+        f = {**SETTINGS, **fetched, 'MB': round(fetched['bytes'] / 1e6, 1), 'error': err}; f.pop('bytes')
+        json.dump({'fetch': f, 'sheets': report}, open(os.path.join(pos[1], f'zipcut-{pos[0]}.json'), 'w'), indent=1)
 
 if __name__ == '__main__':
     if len(sys.argv) < 4: sys.exit(__doc__)
-    main(sys.argv[1:])
+    run(sys.argv[1:])

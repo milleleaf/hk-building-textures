@@ -32,7 +32,7 @@ def build(product, work, sheet):
     rev = sheets.index(product)[sheet]['rev']; rep = {'product': product, 'sheet': sheet, 'rev': rev, 'code': os.environ.get('GITHUB_SHA', 'local')}
     if product == 'indiv-k4':
         step(times, 'fetch', [*PY, 'zipcut.py', 'GLTF', os.path.join(d, 'zip'), sheet, '--prefix', 'BUILDING/'])
-        rep['zipcut'] = json.load(open(os.path.join(d, 'zip', 'zipcut-GLTF.json')))[sheet]
+        z = json.load(open(os.path.join(d, 'zip', 'zipcut-GLTF.json'))); rep['fetch'] = z['fetch']; rep['zipcut'] = z['sheets'][sheet]
         if not os.path.isdir(os.path.join(d, 'zip', sheet, 'BUILDING')): rep['buildings'] = 0
         else:
             step(times, 'convert', ['node', 'indiv.mjs', out, os.path.join(d, 'zip', sheet), '--tex', 'ktx2:4', '--ge', '40'])
@@ -44,7 +44,7 @@ def build(product, work, sheet):
         if not n: rep['buildings'] = 0
         else:
             step(times, 'fetch_photomesh', [*PY, 'zipcut.py', 'CESIUM', os.path.join(d, 'pm'), *sheets.neighbours(sheet), '--near', fp, '--pad', '25'])
-            rep['zipcut'] = json.load(open(os.path.join(d, 'pm', 'zipcut-CESIUM.json')))
+            z = json.load(open(os.path.join(d, 'pm', 'zipcut-CESIUM.json'))); rep['fetch'] = z['fetch']; rep['zipcut'] = z['sheets']
             x0, y0, x1, y1 = sheets.bbox(sheet); g = 0.001
             step(times, 'fetch_3dsd', [*PY, 'fetch3dsd.py', *map(str, (x0 - g, y0 - g, x1 + g, y1 + g)), os.path.join(d, '3dsd')])
             dirs = ','.join(os.path.join(d, 'pm', s) for s in rep['zipcut'])
@@ -63,6 +63,18 @@ def upload(product, sheet, out, rep):
     rep['seconds']['upload'] = round(time.time() - t)
     batch_bucket_files(sheets.BUCKET, add=[(json.dumps(rep, indent=1).encode(), f'{product}/{sheet}/report.json')])
 
+def failed_attempt(product, work, sheet, e):
+    """<product>/<sheet>/failed-<run>.json: the fetch settings and 403s of an attempt that did not publish"""
+    z = {}
+    for k in ('zip/zipcut-GLTF.json', 'pm/zipcut-CESIUM.json'):
+        try: z = json.load(open(os.path.join(work, sheet, k)))
+        except Exception: pass
+    try:
+        from huggingface_hub import batch_bucket_files
+        batch_bucket_files(sheets.BUCKET, add=[(json.dumps({'product': product, 'sheet': sheet, 'code': os.environ.get('GITHUB_SHA', 'local'), 'error': repr(e),
+                           'utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), **z}, indent=1).encode(), f'{product}/{sheet}/failed-{os.environ.get("GITHUB_RUN_ID", "local")}.json')])
+    except Exception as x: print(f'could not record the failed attempt: {x!r}', flush=True)
+
 if __name__ == '__main__':
     a = [x for x in sys.argv[1:] if x != '--no-upload']
     if len(a) < 3: sys.exit(__doc__)
@@ -76,4 +88,5 @@ if __name__ == '__main__':
             if '--no-upload' not in sys.argv: shutil.rmtree(d, ignore_errors=True)
         except Exception as e:
             print(f'FAILED {s}: {e!r}', flush=True); failed.append(s)
+            if '--no-upload' not in sys.argv: failed_attempt(product, work, s, e)
     if failed: sys.exit(f'failed: {failed}')
