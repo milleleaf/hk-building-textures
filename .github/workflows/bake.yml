@@ -18,6 +18,10 @@ on:
       max_jobs:
         description: 'Jobs this run (at most 256)'
         default: '256'
+      force:
+        description: 'Rebuild sheets that are already published (after a converter fix)'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -46,6 +50,7 @@ jobs:
           SHEETS: ${{ inputs.sheets }}
           PER_JOB: ${{ inputs.per_job }}
           MAX_JOBS: ${{ inputs.max_jobs }}
+          FORCE: ${{ inputs.force && '1' || '0' }}
         run: |
           m=$(python sheets.py plan "$PRODUCT" "$SHEETS" "$PER_JOB" "$MAX_JOBS")
           echo "matrix=$m" >> "$GITHUB_OUTPUT"

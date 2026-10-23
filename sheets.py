@@ -48,7 +48,7 @@ def plan(product, which, per_job, max_jobs):
     idx = index(product); sheets = sorted(idx) if which == 'all' else [s.strip() for s in which.split(',') if s.strip()]
     bad = [s for s in sheets if s not in idx]
     if bad: sys.exit(f'not in the {product} sheet index: {bad}')
-    pub = published(product, sheets)
+    pub = {} if os.environ.get('FORCE') == '1' else published(product, sheets)       # FORCE=1: rebuild published sheets too
     todo = [s for s in sheets if s not in pub or (pub[s] is not None and pub[s] != idx[s]['rev'])]
     chunks = [todo[i:i + per_job] for i in range(0, len(todo), per_job)][:min(max_jobs, 256)]
     print(f'{product}: {len(sheets)} asked, {len(sheets) - len(todo)} already published, {len(todo)} to do, '

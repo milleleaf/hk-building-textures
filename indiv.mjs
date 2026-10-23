@@ -31,15 +31,18 @@ fs.rmSync(outDir, { recursive: true, force: true }); fs.mkdirSync(outDir, { recu
 const cells = new Map(), st = { buildings: 0, triangles: 0, images: 0, imageBytesIn: 0, imageBytesOut: 0, glbBytes: 0 }
 for (const [k, f] of files.entries()) {
   const id = path.basename(f, '.gltf'), doc = await io.read(f), root = doc.getRoot(), node = root.listScenes()[0].listChildren()[0]
-  node.setMatrix([1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1])                         // keep Z-up -> Y-up, drop the grid offset
+  const M0 = node.getMatrix(); node.setMatrix([...M0.slice(0, 12), 0, 0, 0, 1])               // keep Z-up -> Y-up (and any unit scale: some are in inches, 0.0254), drop the grid offset
   await pool(root.listTextures(), 4, async (t) => { const img = t.getImage(); st.images++; st.imageBytesIn += img.length
     if (kind !== 'jpeg') t.setImage(new Uint8Array(await encodeKtx2(await decodeImage(img, t.getMimeType(), id), 1 / SCALE, id, kind === 'uastc' ? UASTC : ETC1S))).setMimeType('image/ktx2')
     st.imageBytesOut += t.getImage().length })
   if (kind !== 'jpeg') doc.createExtension(KHRTextureBasisu).setRequired(true)
   for (const m of root.listMeshes()) for (const p of m.listPrimitives()) st.triangles += (p.getIndices()?.getCount() ?? p.getAttribute('POSITION').getCount()) / 3
-  // bounds in the tile frame (ENU, Z-up) from the Z-up POSITION min/max
+  // bounds in the tile frame (ENU, Z-up): POSITION min/max corners through each mesh node's world matrix (Y-up), then Y-up -> Z-up
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
-  for (const m of root.listMeshes()) for (const p of m.listPrimitives()) { const P = p.getAttribute('POSITION'); P.getMin([]).forEach((v, i) => (lo[i] = Math.min(lo[i], v))); P.getMax([]).forEach((v, i) => (hi[i] = Math.max(hi[i], v))) }
+  for (const n of root.listNodes()) { const m = n.getMesh(); if (!m) continue; const W = C.Matrix4.fromArray(n.getWorldMatrix())
+    for (const p of m.listPrimitives()) { const P = p.getAttribute('POSITION'), a = P.getMin([]), b = P.getMax([])
+      for (let c = 0; c < 8; c++) { const v = C.Matrix4.multiplyByPoint(W, new C.Cartesian3(c & 1 ? b[0] : a[0], c & 2 ? b[1] : a[1], c & 4 ? b[2] : a[2]), new C.Cartesian3())
+        ;[v.x, -v.z, v.y].forEach((x, i) => { lo[i] = Math.min(lo[i], x); hi[i] = Math.max(hi[i], x) }) } } }
   await doc.transform(meshopt({ encoder: MeshoptEncoder, level: 'medium' }))                  // geometry: EXT_meshopt_compression (after the bounds: it quantizes POSITION)
   const glb = Buffer.from(await io.writeBinary(doc)); fs.writeFileSync(path.join(outDir, `${id}.glb`), glb); st.glbBytes += glb.length; st.buildings++
   const [lon, lat] = ll[k], h = origins[k][2], E = C.Matrix4.toArray(C.Transforms.eastNorthUpToFixedFrame(C.Cartesian3.fromDegrees(lon, lat, h)))
