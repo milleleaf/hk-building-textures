@@ -33,7 +33,11 @@ def rng(url, start, end):   # inclusive
 def backoff(i, e):
     """Lands D answers 403 to a runner for 20 min or more at times (2026-10-23, ~40 connections from 10 jobs): wait 10 s, 30 s,
     90 s, 270 s, then 5 min a time, about an hour in all, before giving up"""
-    t = min(300, 10 * 3 ** i); print(f'  retry in {t} s after {e!r}', file=sys.stderr, flush=True); time.sleep(t)
+    t = min(300, 10 * 3 ** i); why = repr(e)
+    if i == 0 and hasattr(e, 'headers'):                                  # once: what answered (WAF, CDN, origin)
+        try: why += f" server={e.headers.get('Server')} via={e.headers.get('Via')} body={e.read(300)!r}"
+        except Exception: pass
+    print(f'  retry in {t} s after {why}', file=sys.stderr, flush=True); time.sleep(t)
 
 def head(url):
     for i in range(TRIES):
