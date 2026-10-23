@@ -11,7 +11,8 @@
 // one GLB (KHR_materials_unlit, KHR_texture_basisu) in a 3D Tiles 1.1 tileset whose root transform is ENU -> ECEF
 // (gltfUpAxis Z: positions are east, north, up = mPD), as the photomesh's own frame.
 // usage: node bake.mjs <sheet dir>[,<dir>...] <footprints.json> <out dir> [--near lon,lat --n 50 | --all]
-//        [--texel 0.2] [--search 3] [--png 1] [--diag] [--mesh3dsd <fetch3dsd.py dir> [--chart-deg 20] [--dz 0]]
+//        [--texel 0.2] [--search 3] [--png 1] [--diag] [--mesh3dsd <fetch3dsd.py dir> [--chart-deg 20] [--dz 0] [--out-wall 1.5] [--out-roof 15]
+//        [--planar 0.8] [--veg-out 0.3] [--borrow 0.3]]
 // Several sheet dirs (comma-separated) bake across sheet borders; a tile listed in a tileset.json but not on disk is skipped
 // (zipcut.py fetches only the tiles near the buildings). A footprint with "sheet": false is context only, never baked.
 // --mesh3dsd: see the section of that name below.
@@ -139,7 +140,7 @@ async function shade(W, H, tris, { hitT, hitU }, inside = () => true) {
       r += bil(0); g += bil(1); bl += bil(2); n++ }
     const k = j * w + i; if (!inside(i, j)) continue; texels++
     if (n) { px.set([r / n, g / n, bl / n, 255], 4 * k); hit[k] = 1 } else miss++ }
-  fill(w, h, px, hit); return { w, h, px, texels, miss }
+  const hit0 = hit.slice(); fill(w, h, px, hit); return { w, h, px, texels, miss, hit0 }
 }
 /** no-hit texels take the mean of hit neighbours, growing outward; anything left (no hit at all) mid grey */
 function fill(w, h, px, hit) {
@@ -263,7 +264,15 @@ async function bake(b) {
 // Which CSDI buildings a model stands for: the model's roof (upward triangles, 1 m cells) overlaps the footprints; a model is
 // baked when >= 50 % of its roof falls in the footprints, and a footprint with < 50 % of its cells under a baked model's roof
 // falls back to the CSDI block bake above (counted).
+// A hit counts only within a band along the chart normal: up to --search m behind the 3DSD surface, and in front of it up to
+// --out-wall m on walls (street trees and awnings stand 1-5 m in front of a facade, which sits within ~1 m: offset p90 0.9 m;
+// beyond that, out to --search m, only photomesh triangles facing the wall within acos(--planar), which tree crowns rarely do)
+// and --out-roof m on roofs (seen from above, whatever stands on the roof is what the photos show). A chart whose texels are
+// under --borrow hit takes its missing texels from the best-photographed chart of the same kind on the same model, tiled
+// (instead of a smear from its few hits or flat grey: towers taller than the photomesh, faces behind trees).
 const MESH = opt('--mesh3dsd', null), DZ = +opt('--dz', 0), CHART = Math.cos(+opt('--chart-deg', 20) * Math.PI / 180), HIDE = 0.3
+const OUTW = +opt('--out-wall', 1.5), OUTR = +opt('--out-roof', 15), BORROW = +opt('--borrow', 0.3), PLANAR = +opt('--planar', 0.8), VEG_OUT = +opt('--veg-out', 0.3)
+let vegDropped = 0
 const OFFW = new Float64Array(81), OFFR = new Float64Array(81)          // signed photomesh - 3DSD offset of hits, -10..10 m, 0.25 m bins
 let models = [], meshInfo = {}, ALLX = null, queryAll = null, ZALL = null, DRAWN = null
 const cellKey = (i, j) => i * 100003 + j
@@ -365,7 +374,16 @@ async function bakeMesh(m) {
     const facing = (fac) => (t) => { const o = 9 * t, e1 = [PX[o + 3] - PX[o], PX[o + 4] - PX[o + 1], PX[o + 5] - PX[o + 2]], e2 = [PX[o + 6] - PX[o], PX[o + 7] - PX[o + 1], PX[o + 8] - PX[o + 2]]
       const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]], l = Math.hypot(...n); return l && (n[0] * N[0] + n[1] * N[1] + n[2] * N[2]) / l >= fac }
     const near = (r) => tris.query(ch.xb[0] - r, ch.xb[1] - r, ch.xb[2] + r, ch.xb[3] + r), within = (r) => (d, k) => (mask[k] && Math.abs(d - surf[k]) <= r ? Math.abs(d - surf[k]) : null)
-    const ids = near(SEARCH), R = raster(W, H, tris, ids, projOn(PX, facing(FACING)), within(SEARCH))
+    const out = N[2] >= 0.5 ? OUTR : Math.abs(N[2]) < 0.5 ? OUTW : SEARCH, band = (d, k) => (mask[k] && d - surf[k] >= -SEARCH && d - surf[k] <= out ? Math.abs(d - surf[k]) : null)
+    const ids = near(SEARCH), R = raster(W, H, tris, ids, projOn(PX, facing(FACING)), band)
+    if (out < SEARCH) { // a wall whose photomesh facade stands further out (balconies, bay windows): only planar, facing surfaces (not tree crowns)
+      const R2 = raster(W, H, tris, ids, projOn(PX, facing(PLANAR)), within(SEARCH))
+      for (let k = 0; k < W * H; k++) if (R.hitT[k] < 0 && R2.hitT[k] >= 0) { R.hitT[k] = R2.hitT[k]; R.best[k] = R2.best[k]; R.dep[k] = R2.dep[k]; R.hitU[2 * k] = R2.hitU[2 * k]; R.hitU[2 * k + 1] = R2.hitU[2 * k + 1] } }
+    if (Math.abs(N[2]) < 0.5) { // a green hit standing out from a wall is a tree crown, not the facade: drop it (the chart borrows or fills instead)
+      const ims = await decodeFor(tris, R.hitT)
+      for (let k = 0; k < W * H; k++) { const t = R.hitT[k]; if (t < 0 || R.dep[k] - surf[k] <= VEG_OUT) continue
+        const im = ims.get(tris.tex[t].key), x = Math.min(im.w - 1, Math.max(0, Math.floor(R.hitU[2 * k] * im.w))), y = Math.min(im.h - 1, Math.max(0, Math.floor(R.hitU[2 * k + 1] * im.h))), q = 4 * (y * im.w + x)
+        const r = im.px[q], g = im.px[q + 1], b = im.px[q + 2]; if (g > r && g > b && 2 * g - r - b > 20) { R.hitT[k] = -1; R.best[k] = Infinity; vegDropped++ } } }
     // hidden: another 3DSD surface just outside
     const mine = (g) => g >= m.t0 && g < m.t0 + nt && (chartOf[g - m.t0] === c || (twin[g - m.t0] >= 0 && chartOf[twin[g - m.t0]] === c))   // itself and its twins
     const oth = queryAll(ch.xb[0] - 0.5, ch.xb[1] - 0.5, ch.xb[2] + 0.5, ch.xb[3] + 0.5).filter((g) => DRAWN[g] && !mine(g))
@@ -397,6 +415,13 @@ async function bakeMesh(m) {
       const f = minBest(Rfar, W, i, j)
       add(cs, `${key}.${!meshNear(x, y) ? 'no_mesh_here' : f <= 8 ? 'far_<8' : f <= DR ? 'far_<15' : anyHit(Rany, W, i, j) ? 'wrong_facing' : z > topNear(x, y) + 1 ? 'above_mesh_top' : 'nothing_15m'}`) } }
   const mean = ns ? [rs / ns, gs / ns, bs / ns, 255] : [128, 128, 128, 255]
+  const hf = (ch) => (ch.im.texels ? 1 - ch.im.miss / ch.im.texels : 0)
+  for (const ch of charts) { if (ch.hidden || hf(ch) >= BORROW) continue
+    const dn = charts.filter((c) => c !== ch && !c.hidden && c.kind === ch.kind && hf(c) >= 0.7 && c.im.w * c.im.h >= 16).sort((p, q) => q.im.w * q.im.h - p.im.w * p.im.h)[0]
+    if (!dn) { if (!hf(ch)) { for (let k = 0; k < ch.im.w * ch.im.h; k++) ch.im.px.set(mean, 4 * k); st.meanCharts = (st.meanCharts || 0) + 1 } continue }   // no photo anywhere on it: the model's own mean, not mid grey
+    const { w, h, px, hit0 } = ch.im, D = dn.im; for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { const k = j * w + i; if (hit0[k]) continue
+      const q = 4 * ((j % D.h) * D.w + (i % D.w)); px.set(D.px.subarray(q, q + 4), 4 * k) }
+    st.borrowedCharts = (st.borrowedCharts || 0) + 1 }
   for (const ch of charts) if (ch.hidden) ch.im = { w: 1, h: 1, px: Uint8Array.from(mean) }
   const frac = (ch) => (ch.hidden || !ch.st[ch.kind + 'Texels'] ? 0 : 1 - ch.st[ch.kind + 'Miss'] / ch.st[ch.kind + 'Texels']), drop = new Uint8Array(nt)
   for (let t = 0; t < nt; t++) { const u = twin[t]; if (u < 0 || chartOf[t] < 0 || chartOf[u] < 0) continue
@@ -448,7 +473,7 @@ if (DIAG) { fs.writeFileSync(path.join(outDir, 'diag.json'), JSON.stringify(D, n
 const rep = { buildings: res.length, outside_mesh: outsideMesh, failed: jobs.length - res.length - outsideMesh, skipped_no_height_or_low: skipped, texel_m: TEXEL, search_m: SEARCH, seconds: Math.round((Date.now() - t0) / 1000),
   MB: +(sum('bytes') / 1e6).toFixed(2), ms_per_building_median: res.map((r) => r.ms).sort((p, q) => p - q)[res.length >> 1], kB_per_building_median: Math.round(res.map((r) => r.bytes).sort((p, q) => p - q)[res.length >> 1] / 1e3),
   wall_nohit: +(sum('wallMiss') / sum('wallTexels')).toFixed(3), party_wall_share: +(sum('partyTexels') / sum('wallTexels')).toFixed(3), party_nohit: +(sum('partyMiss') / sum('partyTexels')).toFixed(3), street_wall_nohit: +((sum('wallMiss') - sum('partyMiss')) / (sum('wallTexels') - sum('partyTexels'))).toFixed(3), roof_nohit: +(sum('roofMiss') / sum('roofTexels')).toFixed(3), texels_M: +((sum('wallTexels') + sum('roofTexels')) / 1e6).toFixed(1), coarser_texel: res.filter((r) => r.texel_m > TEXEL).length }
-rep.leaves = leaves.length; rep.leaves_missing = leavesMissing; rep.peak_rss_GB = +(peakRss / 1e9).toFixed(2)
+rep.veg_samples_dropped = vegDropped; rep.leaves = leaves.length; rep.leaves_missing = leavesMissing; rep.peak_rss_GB = +(peakRss / 1e9).toFixed(2)
 if (MESH) { const ms = res.filter((r) => r.mesh), med = (k) => ms.map((r) => r[k]).sort((p, q) => p - q)[ms.length >> 1], pct = (h, q) => { const n = h.reduce((x, y) => x + y, 0); let c = 0; for (let i = 0; i < h.length; i++) if ((c += h[i]) >= q * n) return -10 + (i + 0.5) * 0.25 }
   Object.assign(rep, { mesh: { ...meshInfo, baked: ms.length, outside_mesh: models.length - ms.length, MB: +(sum('bytes', ms) / 1e6).toFixed(2), MB_geometry_raw: +(sum('geomRaw', ms) / 1e6).toFixed(2), MB_geometry_meshopt: +(sum('geom', ms) / 1e6).toFixed(2), MB_texture: +(sum('ktx2', ms) / 1e6).toFixed(2),
     tris: sum('tris', ms), tris_degenerate_dropped: sum('trisDropped', ms), twin_tris_dropped: sum('twinsDropped', ms), charts: sum('charts', ms), charts_twin_dropped: sum('chartsDropped', ms), charts_tiny_lt_0_25m2: sum('tinyCharts', ms), charts_hidden: sum('hiddenCharts', ms), atlas_fill: +(sum('chartTexels', ms) / sum('atlasTexels', ms)).toFixed(3),
