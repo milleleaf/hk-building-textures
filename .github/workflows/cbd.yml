@@ -1,0 +1,133 @@
+# The CBD schedule (Helen, 2026-10-23): every 2 h ONE job builds the next sheets of areas/cbd.json under a download budget,
+# indiv-k4 first, then bake3dsd. A sheet bigger than the budget is carried over: its fetched files go to the actions cache and
+# the next tick continues from there (Lands D data only; no key is written anywhere). Same concurrency group as bake.yml, so it
+# never overlaps another bake run. On a Lands D 403 the stop marker (stop/landsd-403.json) stops this and every later tick
+# until it is removed. When both products' CBD lists are done, the workflow disables itself.
+name: cbd
+on:
+  schedule:
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      budget_mb:
+        description: 'Lands D MB this tick (no new request once spent)'
+        default: '1500'
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: landsd
+  cancel-in-progress: false
+env:
+  WORK: /mnt/work
+  AREA: cbd
+  PRODUCTS: indiv-k4 bake3dsd
+jobs:
+  tick:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      BUDGET_MB: ${{ inputs.budget_mb || '1500' }}
+      ZIP_THREADS: '2'
+      ZIP_SPAN_MB: '8'
+      ZIP_PAUSE_S: '0.5'
+      STOP_ON_403: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        with:
+          python-version: '3.14'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: stop marker, code version, next work
+        id: next
+        run: |
+          echo "CODE_SHA=$(git log -1 --format=%H -- . ':(exclude)status')" >> "$GITHUB_ENV"
+          export CODE_SHA=$(git log -1 --format=%H -- . ':(exclude)status')
+          sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -L https://huggingface.co/buckets/milleleaf/hk-building-textures/resolve/stop/landsd-403.json)
+          if [ "$code" = 200 ]; then echo "stop marker on the bucket: nothing to do"; echo "stopped=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          python sheets.py next "$AREA" $PRODUCTS > "$WORK/next.json"
+          python -c "import json;d=json.load(open('$WORK/next.json'));print({k:d[k] for k in ('product','left','done','failed_here')});print('product='+(d['product'] or ''));print('first='+(d['sheets'][0] if d['sheets'] else ''))" | tee -a /dev/stderr | grep -E '^(product|first)=' >> "$GITHUB_OUTPUT"
+      - name: 'all done - disable this schedule'
+        if: steps.next.outputs.stopped != '1' && steps.next.outputs.product == ''
+        run: gh workflow disable cbd.yml --repo "$GITHUB_REPOSITORY" && echo "both CBD lists done, schedule disabled"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1   # v7.1.0
+        if: steps.next.outputs.product != ''
+        with:
+          node-version: '24.14.0'
+          cache: npm
+      - name: tools (node deps, KTX-Software 4.4.2 with checksum, ffmpeg)
+        if: steps.next.outputs.product != ''
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          curl -fsSL -o ktx.tar.bz2 https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Linux-x86_64.tar.bz2
+          echo 'a8781bad05f9624edbf910b7f258cd0a4ba7d3e63b49ecc0a0ab440bf6a0a245  ktx.tar.bz2' | sha256sum -c
+          mkdir -p "$RUNNER_TEMP/ktx" && tar -xjf ktx.tar.bz2 -C "$RUNNER_TEMP/ktx" --strip-components=1 && rm ktx.tar.bz2
+          echo "KTX_BIN=$RUNNER_TEMP/ktx/bin" >> "$GITHUB_ENV"; echo "LD_LIBRARY_PATH=$RUNNER_TEMP/ktx/lib" >> "$GITHUB_ENV"
+          command -v ffmpeg || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg; }
+          df -h / | tail -1; free -g | head -2
+      # the folder of a sheet the last tick could not finish (Lands D files only), by sheet name
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
+        if: steps.next.outputs.product != ''
+        id: carry
+        with:
+          path: /mnt/work/carry
+          key: carry-${{ steps.next.outputs.product }}-${{ steps.next.outputs.first }}-${{ github.run_id }}
+          restore-keys: carry-${{ steps.next.outputs.product }}-${{ steps.next.outputs.first }}-
+      - name: build and publish until the budget is spent
+        id: build
+        if: steps.next.outputs.product != ''
+        env:
+          PRODUCT: ${{ steps.next.outputs.product }}
+          LANDSD_KEY: ${{ secrets.LANDSD_KEY }}
+          NODE_OPTIONS: --max-old-space-size=12288
+        run: |
+          export BUDGET_FILE="$WORK/budget.json"; echo '{"bytes": 0}' > "$BUDGET_FILE"
+          if [ -d "$WORK/carry" ]; then for d in "$WORK"/carry/*; do [ -d "$d" ] && mv "$d" "$WORK/" && echo "carried over: $(basename "$d") $(du -sh "$WORK/$(basename "$d")" | cut -f1)"; done; fi
+          sheets=$(python -c "import json;print(' '.join(json.load(open('$WORK/next.json'))['sheets']))")
+          set +e; python sheet.py "$PRODUCT" "$WORK" $sheets; rc=$?; set -e
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          if [ -f "$WORK/unfinished.json" ]; then
+            s=$(python -c "import json;print(json.load(open('$WORK/unfinished.json'))['sheet'])")
+            mkdir -p "$WORK/carry" && rm -rf "$WORK/$s/out" && mv "$WORK/$s" "$WORK/carry/" && echo "unfinished=$s" >> "$GITHUB_OUTPUT"
+            echo "carrying over $s: $(du -sh "$WORK/carry/$s" | cut -f1)"
+          fi
+          echo "MB this tick: $(python -c "import json;print(round(json.load(open('$BUDGET_FILE'))['bytes']/1e6,1))")"
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
+        if: always() && steps.build.outputs.unfinished != ''
+        with:
+          path: /mnt/work/carry
+          key: carry-${{ steps.next.outputs.product }}-${{ steps.build.outputs.unfinished }}-${{ github.run_id }}
+      - name: drop older carry-over caches of this product (published sheets, or superseded by this tick's save)
+        if: always() && steps.next.outputs.product != ''
+        env:
+          KEEP: carry-${{ steps.next.outputs.product }}-${{ steps.build.outputs.unfinished }}-${{ github.run_id }}
+          PRODUCT: ${{ steps.next.outputs.product }}
+        run: |
+          for k in $(gh cache list --repo "$GITHUB_REPOSITORY" --key "carry-$PRODUCT-" --limit 100 --json key -q '.[].key'); do
+            [ "$k" = "$KEEP" ] || { gh cache delete "$k" --repo "$GITHUB_REPOSITORY" && echo "deleted cache $k"; }
+          done
+      - name: index, status
+        if: always() && steps.next.outputs.stopped != '1'
+        run: |
+          python publish.py indiv-k4 bake3dsd --no-card | tail -2
+          mkdir -p status
+          python - <<'PY'
+          import json, os, time, urllib.request, sheets
+          w = os.environ['WORK']; nxt = sheets.next_work(os.environ['AREA'], os.environ['PRODUCTS'].split())
+          mb = round(json.load(open(f'{w}/budget.json'))['bytes'] / 1e6, 1) if os.path.exists(f'{w}/budget.json') else 0
+          try: stop = json.load(urllib.request.urlopen('https://huggingface.co/buckets/milleleaf/hk-building-textures/resolve/stop/landsd-403.json', timeout=60))
+          except Exception: stop = None
+          unf = json.load(open(f'{w}/unfinished.json')) if os.path.exists(f'{w}/unfinished.json') else None
+          st = {'utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'run': os.environ.get('GITHUB_RUN_ID'), 'code': sheets.code(), 'area': nxt['area'],
+                'done': nxt['done'], 'left': nxt['left'], 'failed_here': nxt['failed_here'], 'MB_fetched_this_tick': mb, 'budget_MB': float(os.environ['BUDGET_MB']),
+                'carried_over': unf, 'landsd_403': stop}
+          json.dump(st, open('status/last-run.json', 'w'), indent=1); print(json.dumps(st))
+          PY
+          git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add status/last-run.json && git commit -qm "cbd tick $(date -u +%FT%H:%MZ)" && { git pull --rebase -q && git push -q; } || true

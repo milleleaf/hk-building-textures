@@ -35,13 +35,30 @@ def get(url):
         os.makedirs(os.path.dirname(f), exist_ok=True)
         req = urllib.request.Request(urllib.parse.urlunsplit((u.scheme, u.netloc, u.path, urllib.parse.urlencode(q), '')), headers={'User-Agent': 'milleleaf-hk-building-textures'})
         for i in range(16):
-            try: data = urllib.request.urlopen(req, timeout=120).read(); break
+            budget_check()
+            try: data = urllib.request.urlopen(req, timeout=120).read(); budget_add(len(data)); break
             except Exception as e:                          # Lands D answers 403 for a while under load: back off, about an hour in all
                 if i == 15: raise
                 time.sleep(min(300, 10 * 3 ** i))
         open(f + '.part', 'wb').write(data); os.replace(f + '.part', f)
     return f
 
+# Download budget (BUDGET_MB, counted in BUDGET_FILE across every Lands D fetch of a job): no new request once it is spent; the
+# process then exits 75 and leaves what it fetched on disk, so a later job continues from there.
+BUDGET = float(os.environ.get('BUDGET_MB') or 0) * 1e6; BUDGET_FILE = os.environ.get('BUDGET_FILE')
+_spent0 = (json.load(open(BUDGET_FILE)).get('bytes', 0) if BUDGET_FILE and os.path.exists(BUDGET_FILE) else 0); _spent = [0]
+import threading; _block = threading.Lock()
+class OverBudget(Exception): pass
+def budget_check():
+    if BUDGET and _spent0 + _spent[0] >= BUDGET: raise OverBudget(f'download budget of {BUDGET / 1e6:.0f} MB spent')
+def budget_add(n):
+    with _block:
+        _spent[0] += n
+        if BUDGET_FILE: json.dump({'bytes': _spent0 + _spent[0]}, open(BUDGET_FILE, 'w'))
+def _hook(t, v, tb):                                       # budget spent: exit 75, cached files stay for the next job
+    if t is OverBudget: print(f'  {v}: stopping, fetched tiles stay on disk', file=sys.stderr, flush=True); os._exit(75)
+    sys.__excepthook__(t, v, tb)
+sys.excepthook = _hook
 leaves, stats = [], {'json': 0, 'leaf': 0, 'pruned': 0}
 def walk(node, base, M):
     M = mat(M, node['transform']) if 'transform' in node else M

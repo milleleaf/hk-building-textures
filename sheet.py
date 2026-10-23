@@ -15,9 +15,17 @@ def peak_gb():   # largest resident set of any finished child so far (Linux: KB,
     r = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     return round(r / (1e9 if sys.platform == 'darwin' else 1e6), 2)
 
+class Unfinished(Exception): pass            # the job's download budget is spent; what was fetched stays in the sheet's folder
+
 def step(times, name, cmd):
-    t = time.time(); print(f'## {name}: {" ".join(cmd)}', flush=True); subprocess.run(cmd, check=True, cwd=HERE)
+    t = time.time(); print(f'## {name}: {" ".join(cmd)}', flush=True); r = subprocess.run(cmd, cwd=HERE)
     times[name] = round(time.time() - t)
+    if r.returncode == 75: raise Unfinished(name)
+    if r.returncode: raise subprocess.CalledProcessError(r.returncode, cmd)
+
+def budget_spent():
+    f, b = os.environ.get('BUDGET_FILE'), float(os.environ.get('BUDGET_MB') or 0) * 1e6
+    return bool(b and f and os.path.exists(f) and json.load(open(f)).get('bytes', 0) >= b)
 
 def region(product, sheet, out):
     """region for the root tileset: the sheet's bbox grown ~200 m, heights from the sheet tileset's root"""
@@ -28,8 +36,9 @@ def region(product, sheet, out):
     return [round(v * 3.141592653589793 / 180, 9) for v in (x0 - g, y0 - g, x1 + g, y1 + g)] + [round(lo, 1), round(hi, 1)]
 
 def build(product, work, sheet):
-    times, d = {}, os.path.join(work, sheet); out = os.path.join(d, 'out'); shutil.rmtree(d, ignore_errors=True); os.makedirs(d)
-    rev = sheets.index(product)[sheet]['rev']; rep = {'product': product, 'sheet': sheet, 'rev': rev, 'code': os.environ.get('GITHUB_SHA', 'local')}
+    times, d = {}, os.path.join(work, sheet); out = os.path.join(d, 'out'); shutil.rmtree(out, ignore_errors=True); os.makedirs(d, exist_ok=True)
+    if budget_spent(): raise Unfinished('budget spent before the sheet started')   # keeps any carried-over files
+    rev = sheets.index(product)[sheet]['rev']; rep = {'product': product, 'sheet': sheet, 'rev': rev, 'code': sheets.code()}
     if product == 'indiv-k4':
         step(times, 'fetch', [*PY, 'zipcut.py', 'GLTF', os.path.join(d, 'zip'), sheet, '--prefix', 'BUILDING/'])
         z = json.load(open(os.path.join(d, 'zip', 'zipcut-GLTF.json'))); rep['fetch'] = z['fetch']; rep['zipcut'] = z['sheets'][sheet]
@@ -72,7 +81,7 @@ def failed_attempt(product, work, sheet, e):
         except Exception: pass
     try:
         from huggingface_hub import batch_bucket_files
-        batch_bucket_files(sheets.BUCKET, add=[(json.dumps({'product': product, 'sheet': sheet, 'code': os.environ.get('GITHUB_SHA', 'local'), 'error': repr(e),
+        batch_bucket_files(sheets.BUCKET, add=[(json.dumps({'product': product, 'sheet': sheet, 'code': sheets.code(), 'error': repr(e),
                            'utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), **z}, indent=1).encode(), f'{product}/{sheet}/failed-{os.environ.get("GITHUB_RUN_ID", "local")}.json')])
     except Exception as x: print(f'could not record the failed attempt: {x!r}', flush=True)
 
@@ -82,11 +91,15 @@ if __name__ == '__main__':
     product, work, todo = a[0], os.path.abspath(a[1]), a[2:]; os.environ.setdefault('WORK', work); os.makedirs(work, exist_ok=True)
     failed = []
     for s in todo:
+        if budget_spent(): print(f'download budget spent: not starting {s}', flush=True); break
         try:
             d, out, rep = build(product, work, s)
             if '--no-upload' not in sys.argv: upload(product, s, out, rep)
             print(json.dumps({k: rep[k] for k in ('sheet', 'buildings', 'files', 'bytes', 'seconds', 'peak_rss_GB')}), flush=True)
             if '--no-upload' not in sys.argv: shutil.rmtree(d, ignore_errors=True)
+        except Unfinished as e:                      # carry the sheet's folder over to the next job (the workflow caches it)
+            print(f'UNFINISHED {s}: download budget spent in {e}', flush=True)
+            json.dump({'product': product, 'sheet': s}, open(os.path.join(work, 'unfinished.json'), 'w')); break
         except Exception as e:
             print(f'FAILED {s}: {e!r}', flush=True); failed.append(s)
             if '--no-upload' not in sys.argv: failed_attempt(product, work, s, e)

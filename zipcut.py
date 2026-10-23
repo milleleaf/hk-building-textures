@@ -23,6 +23,19 @@ SETTINGS = {'threads': THREADS, 'span_MB': SPAN / (1 << 20), 'pause_s': PAUSE, '
 
 class Blocked(Exception): pass
 
+# Download budget (BUDGET_MB, counted in BUDGET_FILE across every Lands D fetch of a job): no new request once it is spent; the
+# process then exits 75 and leaves what it fetched on disk, so a later job continues from there.
+BUDGET = float(os.environ.get('BUDGET_MB') or 0) * 1e6; BUDGET_FILE = os.environ.get('BUDGET_FILE')
+_spent0 = (json.load(open(BUDGET_FILE)).get('bytes', 0) if BUDGET_FILE and os.path.exists(BUDGET_FILE) else 0); _spent = [0]
+import threading; _block = threading.Lock()
+class OverBudget(Exception): pass
+def budget_check():
+    if BUDGET and _spent0 + _spent[0] >= BUDGET: raise OverBudget(f'download budget of {BUDGET / 1e6:.0f} MB spent')
+def budget_add(n):
+    with _block:
+        _spent[0] += n
+        if BUDGET_FILE: json.dump({'bytes': _spent0 + _spent[0]}, open(BUDGET_FILE, 'w'))
+
 def saw403(url):
     fetched['http403'] += 1
     if fetched['first_403_utc'] is None:
@@ -38,15 +51,16 @@ def saw403(url):
 def rng(url, start, end):   # inclusive
     req = urllib.request.Request(url, headers={'Range': f'bytes={start}-{end}', **UA})
     for i in range(TRIES):
+        budget_check()
         try:
             r = urllib.request.urlopen(req, timeout=300)
             if r.status != 206: raise RuntimeError(f'no range support: HTTP {r.status}')
             b = r.read()
             if len(b) != end - start + 1: raise IOError(f'short read {len(b)} of {end - start + 1}')
-            fetched['requests'] += 1; fetched['bytes'] += len(b)
+            fetched['requests'] += 1; fetched['bytes'] += len(b); budget_add(len(b))
             if PAUSE: time.sleep(PAUSE)
             return b
-        except (RuntimeError, Blocked): raise
+        except (RuntimeError, Blocked, OverBudget): raise
         except Exception as e:
             if getattr(e, 'code', None) == 403: saw403(url)
             if i == TRIES - 1: raise
@@ -63,8 +77,9 @@ def backoff(i, e):
 
 def head(url):
     for i in range(TRIES):
+        budget_check()
         try: return int(urllib.request.urlopen(urllib.request.Request(url, method='HEAD', headers=UA), timeout=60).headers['Content-Length'])
-        except Blocked: raise
+        except (Blocked, OverBudget): raise
         except Exception as e:
             if getattr(e, 'code', None) == 403: saw403(url)
             if i == TRIES - 1: raise
@@ -186,12 +201,14 @@ def main(a):
 def run(a):
     """main(), writing <out>/zipcut-<kind>.json {fetch: settings + totals + 403s, sheets: {...}} also when it fails"""
     flags = {'--prefix', '--near', '--pad'}; pos = [x for i, x in enumerate(a) if x not in flags and (i == 0 or a[i - 1] not in flags)]
-    os.makedirs(pos[1], exist_ok=True); report, err = {}, None
+    os.makedirs(pos[1], exist_ok=True); report, err, over = {}, None, False
     try: report = main(a)
+    except OverBudget as e: err = repr(e); over = True
     except Exception as e: err = repr(e); raise
     finally:
         f = {**SETTINGS, **fetched, 'MB': round(fetched['bytes'] / 1e6, 1), 'error': err}; f.pop('bytes')
         json.dump({'fetch': f, 'sheets': report}, open(os.path.join(pos[1], f'zipcut-{pos[0]}.json'), 'w'), indent=1)
+    if over: print(f'  {err}: stopping, fetched members stay on disk', file=sys.stderr); sys.exit(75)
 
 if __name__ == '__main__':
     if len(sys.argv) < 4: sys.exit(__doc__)
