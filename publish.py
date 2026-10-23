@@ -9,6 +9,7 @@ from huggingface_hub import HfApi, batch_bucket_files, download_bucket_files, ge
 import sheets
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+UP = {'indiv-k4': 'Y', 'bake3dsd': 'Z', 'x': 'Y'}
 SHEET_GE = 60      # a sheet's tileset.json loads within ~3.5 km (sse 16, 1080 px, 60 deg fov); its own cells decide the rest
 
 def reports(product):
@@ -28,7 +29,8 @@ def root_tileset(product, reps):
              'children': [{'boundingVolume': {'region': g}, 'geometricError': SHEET_GE, 'refine': 'ADD', 'content': {'uri': f'{s}/tileset.json'}} for s, g in v]}
             for _, v in sorted(groups.items())]
     if not kids: return None
-    return {'asset': {'version': '1.1', 'extras': {'product': product, 'source': 'github.com/milleleaf/hk-building-textures'}}, 'geometricError': 100000,
+    # 3d-tiles-renderer takes gltfUpAxis from the ROOT tileset for every external one: indiv.mjs writes Y-up glTF, bake.mjs Z-up
+    return {'asset': {'version': '1.1', 'gltfUpAxis': UP[product], 'extras': {'product': product, 'source': 'github.com/milleleaf/hk-building-textures'}}, 'geometricError': 100000,
             'root': {'boundingVolume': {'region': union([k['boundingVolume']['region'] for k in kids])}, 'geometricError': 100000, 'refine': 'ADD', 'children': kids}}
 
 def main(products, card=True):
