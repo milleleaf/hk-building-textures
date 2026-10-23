@@ -21,7 +21,9 @@ const [kind, sc] = TEX.split(':'), SCALE = +(sc || 1)
 
 const files = sheets.flatMap((s) => fs.readdirSync(path.join(s, 'BUILDING')).map((id) => path.join(s, 'BUILDING', id, `${id}.gltf`)).filter((f) => fs.existsSync(f)))
 // HK1980 grid -> lon/lat for every building origin, in one pyproj call
-const origins = files.map((f) => { const m = JSON.parse(fs.readFileSync(f, 'utf8')).nodes[0].matrix; return [m[12], -m[14], m[13]] })
+// the scene's root node carries the grid offset as a matrix (most) or as a translation only (e.g. 14-NW-2B, no rotation, Y-up)
+const origins = files.map((f) => { const j = JSON.parse(fs.readFileSync(f, 'utf8')), n = j.nodes[j.scenes[j.scene ?? 0].nodes[0]]
+  const t = n.matrix ? n.matrix.slice(12, 15) : n.translation || [0, 0, 0]; return [t[0], -t[2], t[1]] })
 const ll = JSON.parse(execFileSync('python3', ['-c', `import json,sys
 from pyproj import Transformer
 t=Transformer.from_crs(2326,4326,always_xy=True)
