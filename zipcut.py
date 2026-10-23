@@ -94,6 +94,10 @@ def near_filter(fp_file, pad):
         return any(x + r >= b[0] and x - r <= b[2] and y + r >= b[1] and y - r <= b[3] for b in cand.values())
     return wanted
 
+def ecef(lon, lat, h=0.0):
+    A, F = 6378137.0, 1 / 298.257223563; E2 = F * (2 - F); lo, la = math.radians(lon), math.radians(lat); n = A / math.sqrt(1 - E2 * math.sin(la) ** 2)
+    return [(n + h) * math.cos(la) * math.cos(lo), (n + h) * math.cos(la) * math.sin(lo), (n * (1 - E2) + h) * math.sin(la)]
+
 def mat(m, n): return [sum(m[r + 4 * k] * n[k + 4 * c] for k in range(4)) for c in range(4) for r in range(4)]
 def pt(m, p): return [sum(m[r + 4 * k] * [*p, 1][k] for k in range(4)) for r in range(3)]
 
@@ -105,9 +109,13 @@ def leaves_near(tss, wanted):
             M = mat(M, node['transform']) if 'transform' in node else M; u = (node.get('content') or {}).get('uri') or (node.get('content') or {}).get('url')
             kids = node.get('children') or []
             if u and not u.endswith('.json') and (node['geometricError'] == 0 or not kids):
-                n += 1; s = node['boundingVolume'].get('sphere')
-                if s is None: raise RuntimeError('non-sphere bounding volume')
-                if wanted(pt(M, s[:3]), s[3]): want.append(os.path.normpath(os.path.join(os.path.dirname(name), u)))
+                n += 1; bv = node['boundingVolume']
+                if 'sphere' in bv: c, r = pt(M, bv['sphere'][:3]), bv['sphere'][3]
+                elif 'box' in bv: c, r = pt(M, bv['box'][:3]), math.hypot(*bv['box'][3:12])          # 11-NW-25B has box leaves
+                else:                                                                                  # region: radians, metres, no transform
+                    w, s_, e, nn, lo, hi = bv['region']; c = ecef(math.degrees((w + e) / 2), math.degrees((s_ + nn) / 2), (lo + hi) / 2)
+                    r = math.hypot((e - w) * 6378137 * math.cos((s_ + nn) / 2), (nn - s_) * 6378137, hi - lo) / 2
+                if wanted(c, r): want.append(os.path.normpath(os.path.join(os.path.dirname(name), u)))
             for c in kids: walk(c, M)
         walk(json.loads(data.decode('utf-8-sig'))['root'], [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
     return want, n
