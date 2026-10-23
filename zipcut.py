@@ -39,7 +39,7 @@ def head(url):
     for i in range(TRIES):
         try: return int(urllib.request.urlopen(urllib.request.Request(url, method='HEAD', headers=UA), timeout=60).headers['Content-Length'])
         except Exception as e:
-            if i == 6: raise
+            if i == TRIES - 1: raise
             backoff(i, e)
 
 class RangeFile(io.RawIOBase):   # seekable read-only file over HTTP Range, 256 KB blocks cached (central directory reads)
