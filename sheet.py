@@ -29,7 +29,7 @@ def region(product, sheet, out):
 
 def build(product, work, sheet):
     times, d = {}, os.path.join(work, sheet); out = os.path.join(d, 'out'); shutil.rmtree(d, ignore_errors=True); os.makedirs(d)
-    rev = sheets.index(product)[sheet]['rev']; rep = {'product': product, 'sheet': sheet, 'rev': rev}
+    rev = sheets.index(product)[sheet]['rev']; rep = {'product': product, 'sheet': sheet, 'rev': rev, 'code': os.environ.get('GITHUB_SHA', 'local')}
     if product == 'indiv-k4':
         step(times, 'fetch', [*PY, 'zipcut.py', 'GLTF', os.path.join(d, 'zip'), sheet, '--prefix', 'BUILDING/'])
         rep['zipcut'] = json.load(open(os.path.join(d, 'zip', 'zipcut-GLTF.json')))[sheet]
