@@ -50,7 +50,8 @@ def plan(product, which, per_job, max_jobs):
     if bad: sys.exit(f'not in the {product} sheet index: {bad}')
     pub = {} if os.environ.get('FORCE') == '1' else published(product, sheets)       # FORCE=1: rebuild published sheets too
     todo = [s for s in sheets if s not in pub or (pub[s] is not None and pub[s] != idx[s]['rev'])]
-    chunks = [todo[i:i + per_job] for i in range(0, len(todo), per_job)][:min(max_jobs, 256)]
+    n = min(-(-len(todo) // per_job), max_jobs, 256)                        # round-robin: dense districts spread over the jobs
+    chunks = [todo[i::n][:per_job] for i in range(n)] if todo else []
     print(f'{product}: {len(sheets)} asked, {len(sheets) - len(todo)} already published, {len(todo)} to do, '
           f'{sum(map(len, chunks))} in {len(chunks)} jobs this run', file=sys.stderr)
     return [{'id': f'{c[0]}+{len(c) - 1}' if len(c) > 1 else c[0], 'sheets': ' '.join(c)} for c in chunks]
