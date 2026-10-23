@@ -9,7 +9,7 @@ bake.mjs skips a tile whose file is missing). Prints and writes <out dir>/zipcut
 usage: python3 -I zipcut.py GLTF <out dir> <sheet>... --prefix BUILDING/
        python3 -I zipcut.py CESIUM <out dir> <sheet>... --near <footprints.json> [--pad 25]
 (from the hk-ifcx spike of 2026-10-23; coalesced spans and --prefix added here)"""
-import io, json, math, os, struct, sys, zipfile, zlib, urllib.request, concurrent.futures as cf
+import io, json, math, os, struct, sys, time, zipfile, zlib, urllib.request, concurrent.futures as cf
 
 KEY = 'ad5940a63bd344c48b0351ef1c7a905e'   # Lands D's public key, published on the CSDI dataset records
 UA = {'User-Agent': 'milleleaf-hk-building-textures'}
@@ -18,7 +18,7 @@ fetched = {'requests': 0, 'bytes': 0}
 
 def rng(url, start, end):   # inclusive
     req = urllib.request.Request(url, headers={'Range': f'bytes={start}-{end}', **UA})
-    for i in range(5):
+    for i in range(7):
         try:
             r = urllib.request.urlopen(req, timeout=300)
             if r.status != 206: raise RuntimeError(f'no range support: HTTP {r.status}')
@@ -26,14 +26,26 @@ def rng(url, start, end):   # inclusive
             if len(b) != end - start + 1: raise IOError(f'short read {len(b)} of {end - start + 1}')
             fetched['requests'] += 1; fetched['bytes'] += len(b); return b
         except RuntimeError: raise
-        except Exception:
-            if i == 4: raise
+        except Exception as e:
+            if i == 6: raise
+            backoff(i, e)
+
+def backoff(i, e):
+    """Lands D answers 403 for a while under load (seen 2026-10-23 with ~44 connections): wait 10 s, 30 s, ... up to 5 min"""
+    t = min(300, 10 * 3 ** i); print(f'  retry in {t} s after {e!r}', file=sys.stderr, flush=True); time.sleep(t)
+
+def head(url):
+    for i in range(7):
+        try: return int(urllib.request.urlopen(urllib.request.Request(url, method='HEAD', headers=UA), timeout=60).headers['Content-Length'])
+        except Exception as e:
+            if i == 6: raise
+            backoff(i, e)
 
 class RangeFile(io.RawIOBase):   # seekable read-only file over HTTP Range, 256 KB blocks cached (central directory reads)
     B = 1 << 18
     def __init__(s, url):
         s.url, s.pos, s.cache = url, 0, {}
-        s.size = int(urllib.request.urlopen(urllib.request.Request(url, method='HEAD', headers=UA), timeout=60).headers['Content-Length'])
+        s.size = head(url)
     def readable(s): return True
     def seekable(s): return True
     def tell(s): return s.pos

@@ -5,7 +5,7 @@ Every request carries ?key= (Lands D needs it on each URL). At most 4 requests a
 Files are cached under <out dir> by URL path; a cached file is not fetched again. Writes <out dir>/leaves.json:
 [{uri, file, transform (16, column-major, tile frame -> ECEF, includes every ancestor transform), box (12)}].
 usage: python3 -I fetch3dsd.py <lon0> <lat0> <lon1> <lat1> <out dir>"""
-import json, math, os, sys, urllib.parse, urllib.request, concurrent.futures as cf
+import json, math, os, sys, time, urllib.parse, urllib.request, concurrent.futures as cf
 
 KEY = 'ad5940a63bd344c48b0351ef1c7a905e'   # Lands D's public key, published on the CSDI dataset records
 ROOT = 'https://data.map.gov.hk/api/3d-data/3dsd/WGS84/building/tileset.json'
@@ -34,10 +34,11 @@ def get(url):
     if not os.path.exists(f):
         os.makedirs(os.path.dirname(f), exist_ok=True)
         req = urllib.request.Request(urllib.parse.urlunsplit((u.scheme, u.netloc, u.path, urllib.parse.urlencode(q), '')), headers={'User-Agent': 'milleleaf-hk-building-textures'})
-        for i in range(3):
+        for i in range(7):
             try: data = urllib.request.urlopen(req, timeout=120).read(); break
-            except Exception as e:
-                if i == 2: raise
+            except Exception as e:                          # Lands D answers 403 for a while under load: back off up to 5 min
+                if i == 6: raise
+                time.sleep(min(300, 10 * 3 ** i))
         open(f + '.part', 'wb').write(data); os.replace(f + '.part', f)
     return f
 
