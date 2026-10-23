@@ -1,0 +1,10 @@
+[
+ {"name": "3D Visualisation Map: Individualised models (per-building glTF with photo textures, one zip per 1:1000 map sheet)", "owner": "Lands Department",
+  "url": "https://portal.csdi.gov.hk/geoportal/?datasetId=landsd_rcd_1671676915450_88604", "licence": "https://portal.csdi.gov.hk/csdi-webpage/doc/TNC"},
+ {"name": "3D Visualisation Map: Tile-based models (Open3Dhk photomesh, 3D Tiles, one zip per 1:1000 map sheet)", "owner": "Lands Department",
+  "url": "https://portal.csdi.gov.hk/geoportal/?datasetId=landsd_rcd_1671677054006_62261", "licence": "https://portal.csdi.gov.hk/csdi-webpage/doc/TNC"},
+ {"name": "3D Spatial Data: building models (streamed 3D Tiles, data.map.gov.hk)", "owner": "Lands Department",
+  "url": "https://data.map.gov.hk/api/3d-data/3dsd/WGS84/building/tileset.json", "licence": "https://portal.csdi.gov.hk/csdi-webpage/doc/TNC"},
+ {"name": "Building footprints with base and top heights (iB1000 Building)", "owner": "Lands Department",
+  "url": "https://portal.csdi.gov.hk/geoportal/?datasetId=landsd_rcd_1637211194312_35158", "licence": "https://portal.csdi.gov.hk/csdi-webpage/doc/TNC"}
+]
