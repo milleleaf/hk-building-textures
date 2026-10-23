@@ -31,7 +31,8 @@ print(json.dumps([t.transform(e,n) for e,n,h in json.load(sys.stdin)]))`], { inp
 
 fs.rmSync(outDir, { recursive: true, force: true }); fs.mkdirSync(outDir, { recursive: true })
 const cells = new Map(), st = { buildings: 0, triangles: 0, images: 0, imageBytesIn: 0, imageBytesOut: 0, glbBytes: 0 }
-for (const [k, f] of files.entries()) {
+const skipped = []                                       // buildings Lands D ships broken (e.g. a texture missing from the zip)
+for (const [k, f] of files.entries()) { try {
   const id = path.basename(f, '.gltf'), doc = await io.read(f), root = doc.getRoot(), node = root.listScenes()[0].listChildren()[0]
   const M0 = node.getMatrix(); node.setMatrix([...M0.slice(0, 12), 0, 0, 0, 1])               // keep Z-up -> Y-up (and any unit scale: some are in inches, 0.0254), drop the grid offset
   await pool(root.listTextures(), 4, async (t) => { const img = t.getImage(); st.images++; st.imageBytesIn += img.length
@@ -55,11 +56,11 @@ for (const [k, f] of files.entries()) {
   Object.assign(cell, { w: Math.min(cell.w, lon - dLon), e: Math.max(cell.e, lon + dLon), s: Math.min(cell.s, lat - dLat), n: Math.max(cell.n, lat + dLat), lo: Math.min(cell.lo, h + lo[2] - 1), hi: Math.max(cell.hi, h + hi[2] + 1) })
   cell.kids.push({ transform: E, boundingVolume: { box: [...c, r[0], 0, 0, 0, r[1], 0, 0, 0, r[2]] }, geometricError: 0, content: { uri: `${id}.glb` } })
   if (k % 100 === 0) console.error(`  ${k}/${files.length}`)
-}
+} catch (e) { skipped.push({ id: path.basename(f, '.gltf'), error: String(e.message || e).slice(0, 200) }); console.error(`  SKIPPED ${path.basename(f)}: ${e.message}`) } }
 const R = (d) => d * Math.PI / 180, region = (c) => [R(c.w), R(c.s), R(c.e), R(c.n), c.lo, c.hi], all = [...cells.values()]
 const top = { w: Math.min(...all.map((c) => c.w)), s: Math.min(...all.map((c) => c.s)), e: Math.max(...all.map((c) => c.e)), n: Math.max(...all.map((c) => c.n)), lo: Math.min(...all.map((c) => c.lo)), hi: Math.max(...all.map((c) => c.hi)) }
 fs.writeFileSync(path.join(outDir, 'tileset.json'), JSON.stringify({ asset: { version: '1.1', gltfUpAxis: 'Y', extras: { source: 'Lands D Individualised models (CSDI landsd_rcd_1671676915450_88604), converted by github.com/milleleaf/hk-building-textures indiv.mjs', tex: TEX } },
   geometricError: 1000, root: { boundingVolume: { region: region(top) }, geometricError: 1000, refine: 'ADD',
     children: all.map((c) => ({ boundingVolume: { region: region(c) }, geometricError: GE, refine: 'ADD', children: c.kids })) } }))
-const rep = { ...st, cells: all.length, tex: TEX, ge: GE, MB: +(st.glbBytes / 1e6).toFixed(1), imageMB_in: +(st.imageBytesIn / 1e6).toFixed(1), imageMB_out: +(st.imageBytesOut / 1e6).toFixed(1) }
+const rep = { ...st, skipped: skipped.length, skipped_detail: skipped, cells: all.length, tex: TEX, ge: GE, MB: +(st.glbBytes / 1e6).toFixed(1), imageMB_in: +(st.imageBytesIn / 1e6).toFixed(1), imageMB_out: +(st.imageBytesOut / 1e6).toFixed(1) }
 fs.writeFileSync(path.join(outDir, 'report.json'), JSON.stringify(rep, null, 1)); console.log(JSON.stringify(rep))

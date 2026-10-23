@@ -38,6 +38,7 @@ def build(product, work, sheet):
             step(times, 'convert', ['node', 'indiv.mjs', out, os.path.join(d, 'zip', sheet), '--tex', 'ktx2:4', '--ge', '40'])
             rep['convert'] = json.load(open(os.path.join(out, 'report.json'))); os.remove(os.path.join(out, 'report.json'))
             rep['buildings'] = rep['convert']['buildings']
+            if not rep['buildings']: shutil.rmtree(out)                       # every building skipped: publish nothing but the report
     else:
         fp = os.path.join(d, 'footprints.json'); t = time.time()
         n = sheets.footprints(sheet, fp); times['footprints'] = round(time.time() - t)

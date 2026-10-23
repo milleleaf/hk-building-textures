@@ -57,10 +57,12 @@ export function tilesOf(tsFile) {
 
 /** Decode an image (glTF bytes + mime) to RGBA8. */
 export async function decodeImage(bytes, mime, tag = 'img') {
-  const [w, h] = ImageUtils.getSize(bytes, mime) || []
+  let [w, h] = ImageUtils.getSize(bytes, mime) || []
   let src = path.join(tmp, `${tag}-${process.hrtime.bigint()}`)
   if (mime === 'image/ktx2') { fs.writeFileSync(src + '.ktx2', bytes); await run(path.join(KTX_BIN, 'ktx'), ['extract', '--transcode', 'rgba8', src + '.ktx2', src + '.png']); fs.rmSync(src + '.ktx2'); src += '.png' }
   else { const e = mime === 'image/png' ? '.png' : '.jpg'; fs.writeFileSync(src + e, bytes); src += e }
+  if (!w || !h) {                                        // a header ImageUtils cannot read (seen on some Lands D PNGs): ask ffprobe
+    const { stdout: p } = await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', src]); [w, h] = p.trim().split(',').map(Number) }
   const { stdout } = await run('ffmpeg', ['-v', 'error', '-i', src, '-f', 'rawvideo', '-pix_fmt', 'rgba', '-'], { encoding: 'buffer', maxBuffer: 1 << 30 })
   fs.rmSync(src); if (stdout.length !== w * h * 4) throw new Error(`decode ${mime}: ${stdout.length} bytes for ${w}x${h}`)
   return { w, h, px: stdout }
