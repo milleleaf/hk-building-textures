@@ -70,7 +70,8 @@ export async function encodeKtx2({ w, h, px }, scale = 1, tag = 'enc', enc = ETC
   const f = path.join(tmp, `${tag}-${process.hrtime.bigint()}`), rgb = Buffer.alloc(w * h * 3)
   for (let i = 0, j = 0; i < w * h * 4; i += 4, j += 3) { rgb[j] = px[i]; rgb[j + 1] = px[i + 1]; rgb[j + 2] = px[i + 2] }
   fs.writeFileSync(f + '.ppm', Buffer.concat([Buffer.from(`P6\n${w} ${h}\n255\n`), rgb]))
-  const sc = scale !== 1 ? ['--scale', String(scale)] : []
+  const s = Math.min(1, Math.max(scale, 1 / Math.min(w, h)))                             // never below 1 px (Lands D ships 38x1 images)
+  const sc = s !== 1 ? ['--scale', String(s)] : []
   await run(path.join(KTX_BIN, 'toktx'), ['--t2', ...enc, ...sc, '--genmipmap', '--assign_oetf', 'srgb', '--threads', '2', f + '.ktx2', f + '.ppm'])
   const out = fs.readFileSync(f + '.ktx2'); fs.rmSync(f + '.ppm'); fs.rmSync(f + '.ktx2'); return out
 }

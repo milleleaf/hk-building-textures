@@ -82,7 +82,8 @@ jobs:
           command -v ffmpeg || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg; }
       - name: disk and memory
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          # the runner had 103 GB free on / in the pilot (2026-10-23); the usual cleanup (2 min) only when under 60 GB
+          [ "$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" -ge 60 ] || sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"
           df -h / /mnt; free -g; nproc
       - name: build and publish
