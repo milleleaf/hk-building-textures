@@ -37,7 +37,8 @@ def poly(rings): return Polygon(rings[0], rings[1:])
 
 def published(product, sheets):
     """{sheet: rev} of sheets whose report.json is on the bucket (rev from the product manifest when it lists the sheet)"""
-    from huggingface_hub import get_bucket_paths_info
+    from huggingface_hub import create_bucket, get_bucket_paths_info
+    create_bucket(BUCKET, private=False, exist_ok=True)
     have = {p.path.split('/')[1] for p in get_bucket_paths_info(BUCKET, [f'{product}/{s}/report.json' for s in sheets])}
     try: man = json.load(urllib.request.urlopen(f'https://huggingface.co/buckets/{BUCKET}/resolve/{product}/manifest.json', timeout=60))['sheets']
     except Exception: man = {}

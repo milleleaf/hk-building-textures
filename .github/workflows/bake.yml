@@ -46,7 +46,9 @@ jobs:
           SHEETS: ${{ inputs.sheets }}
           PER_JOB: ${{ inputs.per_job }}
           MAX_JOBS: ${{ inputs.max_jobs }}
-        run: echo "matrix=$(python sheets.py plan "$PRODUCT" "$SHEETS" "$PER_JOB" "$MAX_JOBS")" >> "$GITHUB_OUTPUT"
+        run: |
+          m=$(python sheets.py plan "$PRODUCT" "$SHEETS" "$PER_JOB" "$MAX_JOBS")
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
   sheet:
     needs: plan
     if: needs.plan.outputs.matrix != '[]'
