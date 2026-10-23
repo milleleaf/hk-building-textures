@@ -13,10 +13,12 @@ tags:
 
 # Hong Kong buildings with photo textures (3D Tiles)
 
-Every Hong Kong building with a real photo texture, in two forms, built per 1:1000 map sheet by
+Hong Kong buildings with a real photo texture, in two forms, built per 1:1000 map sheet by
 [milleleaf/hk-building-textures](https://github.com/milleleaf/hk-building-textures) from Lands Department open data.
 The tiles are in the bucket [milleleaf/hk-building-textures](https://huggingface.co/buckets/milleleaf/hk-building-textures) and are
 read in place by browsers (CORS and HTTP Range). This dataset repo holds this card and the two manifests.
+
+A work in progress, sheet by sheet: on 2026-10-23, 12 of the 3,456 sheets were published as `indiv-k4` (6,152 buildings) and 8 of 3,455 as `bake3dsd` (4,491 buildings). Each product's `manifest.json` has the current count (`sheets_published` of `sheets_in_index`).
 
 | Product | For | What it is |
 |---|---|---|
