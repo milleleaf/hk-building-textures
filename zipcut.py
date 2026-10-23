@@ -13,12 +13,12 @@ import io, json, math, os, struct, sys, time, zipfile, zlib, urllib.request, con
 
 KEY = 'ad5940a63bd344c48b0351ef1c7a905e'   # Lands D's public key, published on the CSDI dataset records
 UA = {'User-Agent': 'milleleaf-hk-building-textures'}
-SPAN, GAP = 32 << 20, 1 << 20               # one request covers members up to 32 MB in all, bridging gaps under 1 MB
+SPAN, GAP, TRIES = 32 << 20, 1 << 20, 16               # one request covers members up to 32 MB in all, bridging gaps under 1 MB
 fetched = {'requests': 0, 'bytes': 0}
 
 def rng(url, start, end):   # inclusive
     req = urllib.request.Request(url, headers={'Range': f'bytes={start}-{end}', **UA})
-    for i in range(7):
+    for i in range(TRIES):
         try:
             r = urllib.request.urlopen(req, timeout=300)
             if r.status != 206: raise RuntimeError(f'no range support: HTTP {r.status}')
@@ -27,15 +27,16 @@ def rng(url, start, end):   # inclusive
             fetched['requests'] += 1; fetched['bytes'] += len(b); return b
         except RuntimeError: raise
         except Exception as e:
-            if i == 6: raise
+            if i == TRIES - 1: raise
             backoff(i, e)
 
 def backoff(i, e):
-    """Lands D answers 403 for a while under load (seen 2026-10-23 with ~44 connections): wait 10 s, 30 s, ... up to 5 min"""
+    """Lands D answers 403 to a runner for 20 min or more at times (2026-10-23, ~40 connections from 10 jobs): wait 10 s, 30 s,
+    90 s, 270 s, then 5 min a time, about an hour in all, before giving up"""
     t = min(300, 10 * 3 ** i); print(f'  retry in {t} s after {e!r}', file=sys.stderr, flush=True); time.sleep(t)
 
 def head(url):
-    for i in range(7):
+    for i in range(TRIES):
         try: return int(urllib.request.urlopen(urllib.request.Request(url, method='HEAD', headers=UA), timeout=60).headers['Content-Length'])
         except Exception as e:
             if i == 6: raise

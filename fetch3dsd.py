@@ -34,10 +34,10 @@ def get(url):
     if not os.path.exists(f):
         os.makedirs(os.path.dirname(f), exist_ok=True)
         req = urllib.request.Request(urllib.parse.urlunsplit((u.scheme, u.netloc, u.path, urllib.parse.urlencode(q), '')), headers={'User-Agent': 'milleleaf-hk-building-textures'})
-        for i in range(7):
+        for i in range(16):
             try: data = urllib.request.urlopen(req, timeout=120).read(); break
-            except Exception as e:                          # Lands D answers 403 for a while under load: back off up to 5 min
-                if i == 6: raise
+            except Exception as e:                          # Lands D answers 403 for a while under load: back off, about an hour in all
+                if i == 15: raise
                 time.sleep(min(300, 10 * 3 ** i))
         open(f + '.part', 'wb').write(data); os.replace(f + '.part', f)
     return f
