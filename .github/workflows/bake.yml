@@ -123,6 +123,9 @@ jobs:
             # a Lands D 403 anywhere in the run (or before it) stops every job before its next sheet; delete the marker to go on
             code=$(curl -s -o /dev/null -w '%{http_code}' -L https://huggingface.co/buckets/milleleaf/hk-building-textures/resolve/stop/landsd-403.json)
             if [ "$code" = 200 ]; then echo "stop marker stop/landsd-403.json on the bucket: not starting $s"; failed=1; break; fi
+            # stop/pause.json: a clean stop between sheets (to change the pace); delete it and dispatch again to go on
+            code=$(curl -s -o /dev/null -w '%{http_code}' -L https://huggingface.co/buckets/milleleaf/hk-building-textures/resolve/stop/pause.json)
+            if [ "$code" = 200 ]; then echo "pause marker stop/pause.json on the bucket: not starting $s"; break; fi
             python sheet.py "$PRODUCT" "$WORK" "$s" || failed=1
             df -h /mnt | tail -1
           done
