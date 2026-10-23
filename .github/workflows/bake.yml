@@ -110,6 +110,7 @@ jobs:
       - name: build and publish
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          LANDSD_KEY: ${{ secrets.LANDSD_KEY }}
           NODE_OPTIONS: --max-old-space-size=12288
           PRODUCT: ${{ inputs.product }}
           SHEETS: ${{ matrix.job.sheets }}

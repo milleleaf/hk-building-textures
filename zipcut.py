@@ -11,7 +11,7 @@ usage: python3 -I zipcut.py GLTF <out dir> <sheet>... --prefix BUILDING/
 (from the hk-ifcx spike of 2026-10-23; coalesced spans and --prefix added here)"""
 import io, json, math, os, struct, sys, time, zipfile, zlib, urllib.request, concurrent.futures as cf
 
-KEY = 'ad5940a63bd344c48b0351ef1c7a905e'   # Lands D's public key, published on the CSDI dataset records
+KEY = os.environ.get('LANDSD_KEY') or 'ad5940a63bd344c48b0351ef1c7a905e'   # our own key (repo secret) if set, else Lands D's public key from the CSDI dataset records
 UA = {'User-Agent': 'milleleaf-hk-building-textures'}
 # Fetch settings (environment, recorded in the report): requests at once, MB per Range request (members bridged across gaps
 # under 1 MB), seconds of pause after each request per thread; STOP_ON_403=1 gives up at the first 403 and leaves a stop marker
@@ -19,7 +19,7 @@ UA = {'User-Agent': 'milleleaf-hk-building-textures'}
 THREADS = int(os.environ.get('ZIP_THREADS', 4)); SPAN = int(float(os.environ.get('ZIP_SPAN_MB', 32)) * (1 << 20)); GAP, TRIES = 1 << 20, 16
 PAUSE = float(os.environ.get('ZIP_PAUSE_S', 0)); STOP = os.environ.get('STOP_ON_403') == '1'
 fetched = {'requests': 0, 'bytes': 0, 'http403': 0, 'first_403_utc': None, 'MB_before_403': None}
-SETTINGS = {'threads': THREADS, 'span_MB': SPAN / (1 << 20), 'pause_s': PAUSE, 'stop_on_403': STOP}
+SETTINGS = {'threads': THREADS, 'span_MB': SPAN / (1 << 20), 'pause_s': PAUSE, 'stop_on_403': STOP, 'key': 'own' if os.environ.get('LANDSD_KEY') else 'public'}
 
 class Blocked(Exception): pass
 

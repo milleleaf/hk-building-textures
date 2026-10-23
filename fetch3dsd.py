@@ -7,7 +7,7 @@ Files are cached under <out dir> by URL path; a cached file is not fetched again
 usage: python3 -I fetch3dsd.py <lon0> <lat0> <lon1> <lat1> <out dir>"""
 import json, math, os, sys, time, urllib.parse, urllib.request, concurrent.futures as cf
 
-KEY = 'ad5940a63bd344c48b0351ef1c7a905e'   # Lands D's public key, published on the CSDI dataset records
+KEY = os.environ.get('LANDSD_KEY') or 'ad5940a63bd344c48b0351ef1c7a905e'   # our own key (repo secret) if set, else Lands D's public key from the CSDI dataset records
 ROOT = 'https://data.map.gov.hk/api/3d-data/3dsd/WGS84/building/tileset.json'
 lon0, lat0, lon1, lat1 = map(float, sys.argv[1:5]); OUT = sys.argv[5]
 
