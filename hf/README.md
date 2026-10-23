@@ -34,16 +34,19 @@ const tiles = new TilesRenderer('https://huggingface.co/buckets/milleleaf/hk-bui
 
 ## Known defects
 
-`bake3dsd` (our bake; seen in the Mong Kok trial sheets):
-- trees, signs and canopies in front of a wall are baked onto the wall;
-- faces the photomesh does not see (narrow lanes, under podiums) are filled from neighbouring texels and look flat and dark;
-- about 21 % of roof texels find no photomesh surface (filled from neighbours), and curved roofs come out pale;
+`bake3dsd` (our bake; seen on the Mong Kok pilot sheets, baker of hk-ifcx commit 6b7e5bf, which reduced but did not remove them):
+- trees, signs and canopies in front of a wall can still be baked onto the wall;
+- faces the photomesh does not see (narrow lanes, under podiums) take another part of the model's texture or its mean colour,
+  so they look flat;
+- on the pilot sheets 9 to 23 % of wall texels and 11 to 24 % of roof texels found no photomesh surface and were filled
+  (per-sheet figures in each `report.json`); curved roofs come out pale;
 - a CSDI footprint with no 3D Spatial Data model and no heights is not drawn.
 
 Both products: heights are metres above Hong Kong Principal Datum, used as ellipsoidal heights without conversion, and
 `indiv-k4` ignores the HK1980 grid convergence (about 0.003 degrees).
-Anonymous Hugging Face downloads are limited to about 3,000 files per 5 minutes per IP address; a close view of a dense
-district loads several hundred to a thousand building files.
+Anonymous Hugging Face downloads are limited to 3,000 files per 5 minutes per IP address. One street-level view of Mong Kok
+loads about 1,400 files of `indiv-k4` or 2,350 of `bake3dsd`, so a second view within 5 minutes fails part-way (HTTP 429)
+unless the files are served through a cache.
 
 ## Sources and terms
 
