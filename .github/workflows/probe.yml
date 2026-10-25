@@ -1,0 +1,35 @@
+# One-off Lands D probe (Helen approved 2026-10-25): two 1 KB Range requests on one GLTF zip, key from the LANDSD_KEY secret.
+# Prints status codes only. Manual; same concurrency group as every other Lands D job.
+name: probe
+on:
+  workflow_dispatch:
+    inputs:
+      sheet:
+        default: '11-NE-17C'
+      control_offset:
+        default: '100000000'
+      offset:
+        default: '2300000000'
+permissions:
+  contents: read
+concurrency:
+  group: landsd
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        with:
+          python-version: '3.14'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - env:
+          LANDSD_KEY: ${{ secrets.LANDSD_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          SHEET: ${{ inputs.sheet }}
+          CONTROL: ${{ inputs.control_offset }}
+          OFFSET: ${{ inputs.offset }}
+        run: python probe.py "$SHEET" "$CONTROL" "$OFFSET"
