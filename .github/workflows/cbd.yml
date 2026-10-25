@@ -1,8 +1,14 @@
-# The CBD schedule (Helen, 2026-10-23): every 2 h ONE job builds the next sheets of areas/cbd.json under a download budget,
-# indiv-k4 first, then bake3dsd. A sheet bigger than the budget is carried over: its fetched files go to the actions cache and
-# the next tick continues from there (Lands D data only; no key is written anywhere). Same concurrency group as bake.yml, so it
-# never overlaps another bake run. On a Lands D 403 the stop marker (stop/landsd-403.json) stops this and every later tick
-# until it is removed. When both products' CBD lists are done, the workflow disables itself.
+# The CBD schedule (Helen, 2026-10-23): ONE job at a time builds the next sheets of areas/cbd.json under a download budget
+# (indiv-k4 first, then bake3dsd). A sheet bigger than the budget is carried over through the actions cache (Lands D files only;
+# no key is written anywhere).
+#
+# Self-chaining: after a tick (publish, index, status commit) a small separate job waits until ~2 h after the tick STARTED and then
+# dispatches the next tick itself (workflow_dispatch with the workflow's own GITHUB_TOKEN, which GitHub allows). It dispatches
+# nothing when the stop marker (stop/landsd-403.json) is on the bucket, when the CBD lists are done, or when another cbd/bake run
+# is active. The cron below is only a backup: a scheduled run exits at once when any other cbd/bake run is active (the chain's
+# waiting job keeps its run active for the whole 2 h, so there is always one), and restarts the chain if it ever broke.
+# A Lands D 403 with STOP_ON_403 leaves the marker and stops the run at once; nothing runs again until the marker is removed.
+# When both lists are done, the workflow disables itself.
 name: cbd
 on:
   schedule:
@@ -12,11 +18,21 @@ on:
       budget_mb:
         description: 'Lands D MB this tick (no new request once spent)'
         default: '1500'
+      dry_run:
+        description: 'Test the chain only: no Lands D request, no fetch, no build (installs the tools and chains)'
+        type: boolean
+        default: false
+      chain_wait_min:
+        description: 'Minutes after this tick started before the next is dispatched'
+        default: '120'
+      dry_chain:
+        description: 'Dry runs only: how many more dry runs to chain after this one'
+        default: '0'
 permissions:
   contents: write
   actions: write
 concurrency:
-  group: landsd
+  group: ${{ github.event_name == 'schedule' && 'cbd-cron' || 'landsd' }}
   cancel-in-progress: false
 env:
   WORK: /mnt/work
@@ -26,15 +42,22 @@ jobs:
   tick:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
+    outputs:
+      started: ${{ steps.t0.outputs.started }}
+      chain: ${{ steps.fin.outputs.chain }}
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       GH_TOKEN: ${{ github.token }}
       BUDGET_MB: ${{ inputs.budget_mb || '1500' }}
+      DRY: ${{ inputs.dry_run && '1' || '0' }}
+      DRY_CHAIN: ${{ inputs.dry_chain || '0' }}
       ZIP_THREADS: '2'
       ZIP_SPAN_MB: '8'
       ZIP_PAUSE_S: '0.5'
       STOP_ON_403: '1'
     steps:
+      - id: t0
+        run: echo "started=$(date +%s)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
           fetch-depth: 0
@@ -43,34 +66,38 @@ jobs:
           python-version: '3.14'
           cache: pip
       - run: pip install -r requirements.txt
-      - name: stop marker, code version, next work
+      - name: guards and next work
         id: next
         run: |
-          echo "CODE_SHA=$(git log -1 --format=%H -- . ':(exclude)status')" >> "$GITHUB_ENV"
-          export CODE_SHA=$(git log -1 --format=%H -- . ':(exclude)status')
           sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"
+          if [ "$DRY" = 1 ]; then echo "dry run: no Lands D request"; echo "dry=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "${{ github.event_name }}" = schedule ]; then
+            act=$(.github/scripts/activeruns.sh)
+            if [ -n "$act" ]; then echo "backup cron: another cbd/bake run is active, nothing to do: $act"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          fi
+          export CODE_SHA=$(git log -1 --format=%H -- . ':(exclude)status'); echo "CODE_SHA=$CODE_SHA" >> "$GITHUB_ENV"
           code=$(curl -s -o /dev/null -w '%{http_code}' -L https://huggingface.co/buckets/milleleaf/hk-building-textures/resolve/stop/landsd-403.json)
           if [ "$code" = 200 ]; then echo "stop marker on the bucket: nothing to do"; echo "stopped=1" >> "$GITHUB_OUTPUT"; exit 0; fi
           python sheets.py next "$AREA" $PRODUCTS > "$WORK/next.json"
           python -c "import json;d=json.load(open('$WORK/next.json'));print({k:d[k] for k in ('product','left','done','failed_here')});print('product='+(d['product'] or ''));print('first='+(d['sheets'][0] if d['sheets'] else ''))" | tee -a /dev/stderr | grep -E '^(product|first)=' >> "$GITHUB_OUTPUT"
       - name: 'all done - disable this schedule'
-        if: steps.next.outputs.stopped != '1' && steps.next.outputs.product == ''
+        if: steps.next.outputs.stopped != '1' && steps.next.outputs.skip != '1' && steps.next.outputs.dry != '1' && steps.next.outputs.product == ''
         run: gh workflow disable cbd.yml --repo "$GITHUB_REPOSITORY" && echo "both CBD lists done, schedule disabled"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1   # v7.1.0
         if: steps.next.outputs.product != ''
         with:
           node-version: '24.14.0'
           cache: npm
-      - name: tools (node deps, KTX-Software 4.4.2 with checksum, ffmpeg)
+      - run: npm ci --ignore-scripts --no-audit --no-fund
         if: steps.next.outputs.product != ''
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          curl -fsSL -o ktx.tar.bz2 https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Linux-x86_64.tar.bz2
-          echo 'a8781bad05f9624edbf910b7f258cd0a4ba7d3e63b49ecc0a0ab440bf6a0a245  ktx.tar.bz2' | sha256sum -c
-          mkdir -p "$RUNNER_TEMP/ktx" && tar -xjf ktx.tar.bz2 -C "$RUNNER_TEMP/ktx" --strip-components=1 && rm ktx.tar.bz2
-          echo "KTX_BIN=$RUNNER_TEMP/ktx/bin" >> "$GITHUB_ENV"; echo "LD_LIBRARY_PATH=$RUNNER_TEMP/ktx/lib" >> "$GITHUB_ENV"
-          command -v ffmpeg || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg; }
-          df -h / | tail -1; free -g | head -2
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
+        if: steps.next.outputs.product != '' || steps.next.outputs.dry == '1'
+        with:
+          path: ~/.cache/hkbt-ffmpeg
+          key: ffmpeg-3c2d43d9
+      - name: tools (KTX-Software and a static ffmpeg, both pinned by sha256)
+        if: steps.next.outputs.product != '' || steps.next.outputs.dry == '1'
+        run: ./install-tools.sh
       # the folder of a sheet the last tick could not finish (Lands D files only), by sheet name
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
         if: steps.next.outputs.product != ''
@@ -92,6 +119,7 @@ jobs:
           sheets=$(python -c "import json;print(' '.join(json.load(open('$WORK/next.json'))['sheets']))")
           set +e; python sheet.py "$PRODUCT" "$WORK" $sheets; rc=$?; set -e
           echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          if [ "$rc" = 76 ]; then echo "::warning::Lands D answered 403: marker left, this tick stopped"; fi
           if [ -f "$WORK/unfinished.json" ]; then
             s=$(python -c "import json;print(json.load(open('$WORK/unfinished.json'))['sheet'])")
             mkdir -p "$WORK/carry" && rm -rf "$WORK/$s/out" && mv "$WORK/$s" "$WORK/carry/" && echo "unfinished=$s" >> "$GITHUB_OUTPUT"
@@ -113,7 +141,8 @@ jobs:
             [ "$k" = "$KEEP" ] || { gh cache delete "$k" --repo "$GITHUB_REPOSITORY" && echo "deleted cache $k"; }
           done
       - name: index, status
-        if: always() && steps.next.outputs.stopped != '1'
+        id: status
+        if: always() && steps.next.outputs.stopped != '1' && steps.next.outputs.skip != '1' && steps.next.outputs.dry != '1'
         run: |
           python publish.py indiv-k4 bake3dsd --no-card | tail -2
           mkdir -p status
@@ -128,6 +157,57 @@ jobs:
                 'done': nxt['done'], 'left': nxt['left'], 'failed_here': nxt['failed_here'], 'MB_fetched_this_tick': mb, 'budget_MB': float(os.environ['BUDGET_MB']),
                 'carried_over': unf, 'landsd_403': stop}
           json.dump(st, open('status/last-run.json', 'w'), indent=1); print(json.dumps(st))
+          open(os.environ['GITHUB_OUTPUT'], 'a').write(f"more={1 if nxt['product'] else 0}\n")     # 0: nothing left to schedule
           PY
           git config user.name 'github-actions[bot]'; git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add status/last-run.json && git commit -qm "cbd tick $(date -u +%FT%H:%MZ)" && { git pull --rebase -q && git push -q; } || true
+      - name: chain this tick to the next?
+        id: fin
+        if: always()
+        env:
+          SKIP: ${{ steps.next.outputs.skip }}
+          STOPPED: ${{ steps.next.outputs.stopped }}
+          PRODUCT: ${{ steps.next.outputs.product }}
+          MORE: ${{ steps.status.outputs.more }}
+        run: |
+          chain=""
+          if [ "$SKIP" = 1 ] || [ "$STOPPED" = 1 ]; then :
+          elif [ "$DRY" = 1 ]; then [ "$DRY_CHAIN" -gt 0 ] && chain=1
+          else
+            code=$(curl -s -o /dev/null -w '%{http_code}' -L https://huggingface.co/buckets/milleleaf/hk-building-textures/resolve/stop/landsd-403.json)
+            [ "$code" != 200 ] && [ -n "$PRODUCT" ] && [ "$MORE" != 0 ] && chain=1
+          fi
+          echo "chain=$chain" >> "$GITHUB_OUTPUT"; echo "chain to the next tick: ${chain:-no}"
+
+  chain:
+    needs: tick
+    if: always() && needs.tick.outputs.chain == '1'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 200
+    env:
+      GH_TOKEN: ${{ github.token }}
+      STARTED: ${{ needs.tick.outputs.started }}
+      WAIT_MIN: ${{ inputs.chain_wait_min || '120' }}
+      BUDGET_MB: ${{ inputs.budget_mb || '1500' }}
+      DRY: ${{ inputs.dry_run && '1' || '0' }}
+      DRY_CHAIN: ${{ inputs.dry_chain || '0' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      - name: wait until about 2 h after the tick started
+        run: |
+          target=$(( STARTED + WAIT_MIN * 60 )); now=$(date +%s)
+          if [ "$target" -gt "$now" ]; then echo "waiting $(( (target - now) / 60 )) min"; sleep $(( target - now )); fi
+      - name: dispatch the next tick, unless guarded
+        run: |
+          if [ "$DRY" != 1 ]; then
+            code=$(curl -s -o /dev/null -w '%{http_code}' -L https://huggingface.co/buckets/milleleaf/hk-building-textures/resolve/stop/landsd-403.json)
+            if [ "$code" = 200 ]; then echo "stop marker on the bucket: not dispatching"; exit 0; fi
+          fi
+          act=$(.github/scripts/activeruns.sh ignore-young-cron)
+          if [ -n "$act" ]; then echo "another cbd/bake run is active, not dispatching: $act"; exit 0; fi
+          if [ "$DRY" = 1 ]; then
+            gh workflow run cbd.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f dry_run=true -f chain_wait_min="$WAIT_MIN" -f dry_chain="$(( DRY_CHAIN - 1 ))"
+          else
+            gh workflow run cbd.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f budget_mb="$BUDGET_MB"
+          fi
+          echo "dispatched the next tick at $(date -u +%FT%TZ)"

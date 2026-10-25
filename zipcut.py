@@ -201,14 +201,16 @@ def main(a):
 def run(a):
     """main(), writing <out>/zipcut-<kind>.json {fetch: settings + totals + 403s, sheets: {...}} also when it fails"""
     flags = {'--prefix', '--near', '--pad'}; pos = [x for i, x in enumerate(a) if x not in flags and (i == 0 or a[i - 1] not in flags)]
-    os.makedirs(pos[1], exist_ok=True); report, err, over = {}, None, False
+    os.makedirs(pos[1], exist_ok=True); report, err, over, blocked = {}, None, False, False
     try: report = main(a)
     except OverBudget as e: err = repr(e); over = True
+    except Blocked as e: err = repr(e); blocked = True
     except Exception as e: err = repr(e); raise
     finally:
         f = {**SETTINGS, **fetched, 'MB': round(fetched['bytes'] / 1e6, 1), 'error': err}; f.pop('bytes')
         json.dump({'fetch': f, 'sheets': report}, open(os.path.join(pos[1], f'zipcut-{pos[0]}.json'), 'w'), indent=1)
     if over: print(f'  {err}: stopping, fetched members stay on disk', file=sys.stderr); sys.exit(75)
+    if blocked: print(f'  {err}', file=sys.stderr); sys.exit(76)          # a Lands D 403 with STOP_ON_403: the caller stops everything
 
 if __name__ == '__main__':
     if len(sys.argv) < 4: sys.exit(__doc__)

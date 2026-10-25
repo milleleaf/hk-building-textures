@@ -28,6 +28,16 @@ def meets(bv, M):
     half = [sum(abs(sum(M[r + 4 * k] * b[3 + 3 * j + k] for k in range(3))) for j in range(3)) for r in range(3)]
     return all(c[i] + half[i] >= AMIN[i] and c[i] - half[i] <= AMAX[i] for i in range(3))
 
+def blocked(path):
+    """Lands D 403 with STOP_ON_403=1: leave the stop marker (no key, no query string) and exit 76; the caller stops everything"""
+    try:
+        from huggingface_hub import batch_bucket_files
+        batch_bucket_files('milleleaf/hk-building-textures', add=[(json.dumps({'url': 'https://data.map.gov.hk' + path, 'bytes': _spent[0], 'http403': 1,
+            'first_403_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'job': os.environ.get('GITHUB_JOB'), 'run': os.environ.get('GITHUB_RUN_ID'),
+            'settings': {'key': 'own' if os.environ.get('LANDSD_KEY') else 'public', 'tool': 'fetch3dsd'}}).encode(), 'stop/landsd-403.json')])
+    except Exception as e: print(f'  could not write the stop marker: {e!r}', file=sys.stderr)
+    print(f'  403 from Lands D after {_spent[0] / 1e6:.1f} MB: stopping (STOP_ON_403=1)', file=sys.stderr, flush=True); os._exit(76)
+
 def get(url):
     u = urllib.parse.urlsplit(url); q = dict(urllib.parse.parse_qsl(u.query)); q['key'] = KEY
     f = os.path.join(OUT, 'cache', u.path.lstrip('/'))
@@ -37,7 +47,8 @@ def get(url):
         for i in range(16):
             budget_check()
             try: data = urllib.request.urlopen(req, timeout=120).read(); budget_add(len(data)); break
-            except Exception as e:                          # Lands D answers 403 for a while under load: back off, about an hour in all
+            except Exception as e:
+                if getattr(e, 'code', None) == 403 and os.environ.get('STOP_ON_403') == '1': blocked(u.path)                          # Lands D answers 403 for a while under load: back off, about an hour in all
                 if i == 15: raise
                 time.sleep(min(300, 10 * 3 ** i))
         open(f + '.part', 'wb').write(data); os.replace(f + '.part', f)

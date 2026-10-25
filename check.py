@@ -17,6 +17,7 @@ assert re.search(r'^license_link: https://', card, re.M), 'hf/README.md has no l
 for w in glob.glob('.github/workflows/*.yml'):
     y = yaml.safe_load(open(w))                                        # YAML reads the key `on` as True
     assert isinstance(y, dict) and (y.get('on') or y.get(True)) and y.get('jobs'), f'{w}: no triggers or jobs (invalid workflow)'
+for sh in glob.glob('*.sh') + glob.glob('.github/scripts/*.sh'): subprocess.run(['bash', '-n', sh], check=True)
 subprocess.run(['node', '--check', 'bake.mjs'], check=True); subprocess.run(['node', '--check', 'indiv.mjs'], check=True)
 import publish
 t = publish.root_tileset('x', {'11-NW-19B': {'buildings': 2, 'region': [0, 0, 1, 1, 0, 9]}, '11-NW-19A': {'buildings': 0}, '12-SE-1A': {'buildings': 1, 'region': [2, 2, 3, 3, -1, 5]}})

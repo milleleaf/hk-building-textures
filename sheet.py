@@ -15,12 +15,14 @@ def peak_gb():   # largest resident set of any finished child so far (Linux: KB,
     r = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     return round(r / (1e9 if sys.platform == 'darwin' else 1e6), 2)
 
+class Blocked403(Exception): pass           # a Lands D 403 with STOP_ON_403: stop the whole run, not just this sheet
 class Unfinished(Exception): pass            # the job's download budget is spent; what was fetched stays in the sheet's folder
 
 def step(times, name, cmd):
     t = time.time(); print(f'## {name}: {" ".join(cmd)}', flush=True); r = subprocess.run(cmd, cwd=HERE)
     times[name] = round(time.time() - t)
     if r.returncode == 75: raise Unfinished(name)
+    if r.returncode == 76: raise Blocked403(name)
     if r.returncode: raise subprocess.CalledProcessError(r.returncode, cmd)
 
 def budget_spent():
@@ -89,7 +91,7 @@ if __name__ == '__main__':
     a = [x for x in sys.argv[1:] if x != '--no-upload']
     if len(a) < 3: sys.exit(__doc__)
     product, work, todo = a[0], os.path.abspath(a[1]), a[2:]; os.environ.setdefault('WORK', work); os.makedirs(work, exist_ok=True)
-    failed = []
+    failed, blocked = [], False
     for s in todo:
         if budget_spent(): print(f'download budget spent: not starting {s}', flush=True); break
         try:
@@ -97,10 +99,14 @@ if __name__ == '__main__':
             if '--no-upload' not in sys.argv: upload(product, s, out, rep)
             print(json.dumps({k: rep[k] for k in ('sheet', 'buildings', 'files', 'bytes', 'seconds', 'peak_rss_GB')}), flush=True)
             if '--no-upload' not in sys.argv: shutil.rmtree(d, ignore_errors=True)
+        except Blocked403 as e:                      # 403: nothing else is fetched; no failed record (the sheet is fine); its folder is carried over
+            print(f'BLOCKED {s}: Lands D answered 403 in {e}; stopping this run', flush=True)
+            json.dump({'product': product, 'sheet': s}, open(os.path.join(work, 'unfinished.json'), 'w')); blocked = True; break
         except Unfinished as e:                      # carry the sheet's folder over to the next job (the workflow caches it)
             print(f'UNFINISHED {s}: download budget spent in {e}', flush=True)
             json.dump({'product': product, 'sheet': s}, open(os.path.join(work, 'unfinished.json'), 'w')); break
         except Exception as e:
             print(f'FAILED {s}: {e!r}', flush=True); failed.append(s)
             if '--no-upload' not in sys.argv: failed_attempt(product, work, s, e)
+    if blocked: sys.exit(76)
     if failed: sys.exit(f'failed: {failed}')

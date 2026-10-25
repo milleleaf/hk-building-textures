@@ -92,15 +92,12 @@ jobs:
           node-version: '24.14.0'
           cache: npm
       - run: pip install -r requirements.txt && npm ci --ignore-scripts --no-audit --no-fund
-      - name: tools (KTX-Software 4.4.2, checksum from its GitHub release; ffmpeg)
-        run: |
-          curl -fsSL -o ktx.tar.bz2 https://github.com/KhronosGroup/KTX-Software/releases/download/v4.4.2/KTX-Software-4.4.2-Linux-x86_64.tar.bz2
-          echo 'a8781bad05f9624edbf910b7f258cd0a4ba7d3e63b49ecc0a0ab440bf6a0a245  ktx.tar.bz2' | sha256sum -c
-          mkdir -p "$RUNNER_TEMP/ktx" && tar -xjf ktx.tar.bz2 -C "$RUNNER_TEMP/ktx" --strip-components=1 && rm ktx.tar.bz2
-          echo "KTX_BIN=$RUNNER_TEMP/ktx/bin" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=$RUNNER_TEMP/ktx/lib" >> "$GITHUB_ENV"
-          LD_LIBRARY_PATH="$RUNNER_TEMP/ktx/lib" "$RUNNER_TEMP/ktx/bin/toktx" --version
-          command -v ffmpeg || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg; }
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
+        with:
+          path: ~/.cache/hkbt-ffmpeg
+          key: ffmpeg-3c2d43d9
+      - name: tools (KTX-Software and a static ffmpeg, both pinned by sha256)
+        run: ./install-tools.sh
       - name: disk and memory
         run: |
           # the runner had 103 GB free on / in the pilot (2026-10-23); the usual cleanup (2 min) only when under 60 GB
