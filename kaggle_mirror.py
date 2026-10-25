@@ -58,14 +58,14 @@ def card_body():
     t = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hf', 'README.md'), encoding='utf-8').read()
     return re.sub(r'\A---\n.*?\n---\n', '', t, flags=re.S).strip()
 
-def mirror(slug, title, root, paths):
+def mirror(slug, title, root, paths, description=None):
     exists = subprocess.run(['kaggle', 'datasets', 'files', slug], capture_output=True).returncode == 0
     with tempfile.TemporaryDirectory() as d:
         for p in paths:                                                    # keep relative paths: bus/x.json.gz -> bus/...
             dst = os.path.join(d, p.split('/')[0])
             if not os.path.exists(dst):
                 os.symlink(os.path.abspath(os.path.join(root, p.split('/')[0])), dst)
-        meta = {'title': title, 'id': slug, 'licenses': [{'name': 'other'}], 'description': card_body()}
+        meta = {'title': title, 'id': slug, 'licenses': [{'name': 'other'}], 'description': description or card_body()}
         json.dump(meta, open(os.path.join(d, 'dataset-metadata.json'), 'w'), indent=1)
         mode = ['-r', 'zip']                                               # folders go up zipped; Kaggle unpacks them
         if exists:

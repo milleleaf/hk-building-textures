@@ -1,5 +1,6 @@
-# Kaggle archive (kaggle_group.py): one public dataset per product and 1:5000 map-sheet group, owned by helenkwok.
-# Manual only, and only after a full bake: needs the repo secret KAGGLE_API_TOKEN (Helen's Kaggle token).
+# Kaggle archive (kaggle_product.py): ONE public dataset per product, milleleaf/hk-building-textures-<product> (owner input).
+# Manual only, never on a timer: every run uploads the whole product as a new dataset version (a Kaggle version is exactly the
+# files of its upload folder). Needs the repo secret KAGGLE_API_TOKEN (Helen's token, placed by her; it does not exist yet).
 name: kaggle
 on:
   workflow_dispatch:
@@ -7,11 +8,18 @@ on:
       product:
         type: choice
         options: [indiv-k4, bake3dsd]
-      groups:
-        description: 'Comma-separated 1:5000 groups (11-NW,...) or all'
-        default: '11-NW'
+      owner:
+        description: 'Kaggle owner of the dataset (a user or organization that exists)'
+        default: 'milleleaf'
+      dry:
+        description: 'Stage and list only: no Kaggle call'
+        type: boolean
+        default: false
 permissions:
   contents: read
+concurrency:
+  group: kaggle
+  cancel-in-progress: false
 jobs:
   mirror:
     runs-on: ubuntu-24.04
@@ -24,11 +32,13 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt
       - run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          sudo mkdir -p /mnt/kaggle && sudo chown "$USER" /mnt/kaggle && df -h / /mnt
+          [ "$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" -ge 60 ] || sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo mkdir -p /mnt/kaggle && sudo chown "$USER" /mnt/kaggle && df -h /
       - env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
           KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+          KAGGLE_OWNER: ${{ inputs.owner }}
           PRODUCT: ${{ inputs.product }}
-          GROUPS: ${{ inputs.groups }}
+          DRY: ${{ inputs.dry && '--dry' || '' }}
           TMPDIR: /mnt/kaggle
-        run: python kaggle_group.py "$PRODUCT" "$GROUPS" /mnt/kaggle
+        run: python kaggle_product.py "$PRODUCT" /mnt/kaggle $DRY

@@ -21,12 +21,12 @@ def reports(product):
 
 def union(rs): return [min(r[0] for r in rs), min(r[1] for r in rs), max(r[2] for r in rs), max(r[3] for r in rs), min(r[4] for r in rs), max(r[5] for r in rs)]
 
-def root_tileset(product, reps):
+def root_tileset(product, reps, uri=lambda s: f'{s}/tileset.json'):
     groups = {}
     for s, r in sorted(reps.items()):
         if r.get('buildings') and r.get('region'): groups.setdefault('-'.join(s.split('-')[:2]), []).append((s, r['region']))
     kids = [{'boundingVolume': {'region': union([g for _, g in v])}, 'geometricError': SHEET_GE, 'refine': 'ADD',
-             'children': [{'boundingVolume': {'region': g}, 'geometricError': SHEET_GE, 'refine': 'ADD', 'content': {'uri': f'{s}/tileset.json'}} for s, g in v]}
+             'children': [{'boundingVolume': {'region': g}, 'geometricError': SHEET_GE, 'refine': 'ADD', 'content': {'uri': uri(s)}} for s, g in v]}
             for _, v in sorted(groups.items())]
     if not kids: return None
     # 3d-tiles-renderer takes gltfUpAxis from the ROOT tileset for every external one: indiv.mjs writes Y-up glTF, bake.mjs Z-up
