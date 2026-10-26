@@ -1,0 +1,8 @@
+{
+  "name": "hk-building-textures-deploy",
+  "private": true,
+  "description": "wrangler, pinned, for the pages workflow only (npm ci --ignore-scripts)",
+  "dependencies": {
+    "wrangler": "4.152.0"
+  }
+}

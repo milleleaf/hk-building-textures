@@ -26,3 +26,13 @@ Run one sheet locally (needs Python 3.14 with `requirements.txt`, Node 24 with `
 
 The converters come from the hk-ifcx spikes of 2026-10-23. Data © Lands Department, HKSAR Government (data.map.gov.hk, CSDI Portal),
 free for commercial and non-commercial use with attribution; sources in `sources.json`. Code: Apache-2.0.
+
+## Serving the textures to the map: Cloudflare Pages
+
+Hugging Face stays the source of truth and Kaggle the archive; the map reads from Cloudflare Pages (`pages.py` has the design, `pages.yml` runs it).
+- **Limits** (Cloudflare docs, 2026-10-26, Free plan): 20,000 files per Pages site, 25 MiB per file, 100 projects per account (not routinely raised), 100 rules in `_headers`; static requests and bandwidth are free. "500 builds a month" is for Git builds; direct uploads are not listed there. Cloudflare now says to start new projects on Workers (static assets); a Pages deploy is one script (`deploy/deploy.sh`), so moving later is a small change.
+- **Shards:** `areas/pages-shards.json` maps every sheet to a shard per product, at most 15,000 deployed files per shard, append-only (a sheet never moves; new sheets go to the last shard with room). Projects are `milleleaf-hkbt-<product>-<nn>`, plus one `milleleaf-hkbt-index`. A deploy is a whole-site snapshot, so every deploy stages the whole shard.
+- **What a shard holds:** `<sheet>/tileset.json` and the sheet's glb files renamed `<id>-<sha8>.glb` (the name carries the content, so `Cache-Control: immutable` stays safe after a rebuild), a shard `tileset.json`, and `_headers` (CORS `*`, 1-year immutable for glb, 5 minutes for tilesets).
+- **The index project** serves `<product>/tileset.json` (the root tileset, with ABSOLUTE uris to each sheet's tileset on its shard's `.pages.dev`, so one root spans origins), `<product>/manifest.json`, `<product>/shards.json` and `index.json`. It is separate so the root can change without touching a full shard.
+- **Staging** syncs whole sheet folders from the bucket with the authenticated batch API (it does not spend the 5,000-per-5-minutes resolve quota that a per-file download would), 8 sheets at a time. An Actions cache of staged shards does not fit (10 GB per repo).
+- **Triggers:** `pages.yml` by hand (`verify`, `changed`, `all`, `shard`; `dry` stages and counts without any Cloudflare call), a daily run, and a step at the end of a cbd tick. The last two only act when the repo variable `PAGES_ENABLED` is `true`. `changed` redeploys a shard only when its sheets changed and it was not deployed in the last 24 h; the rest wait for the next run.
