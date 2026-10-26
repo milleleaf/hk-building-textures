@@ -41,12 +41,15 @@ HEADERS_INDEX = """/*
 """
 
 def project(product, n): return f'{PREFIX}-{product}-{n}'
-def base_url(proj, subs=None): return 'https://' + ((subs or {}).get(proj) or f'{proj}.pages.dev')
+def base_url(proj, subs=None):
+    t = os.environ.get('PAGES_BASE_TEMPLATE')                    # local cross-origin test: e.g. http://127.0.0.1:886{n} (n = the shard number)
+    if t: return t.format(n=int(proj.rsplit('-', 1)[1]))
+    return 'https://' + ((subs or {}).get(proj) or f'{proj}.pages.dev')
 def bucket_json(path):
     try: return json.load(urllib.request.urlopen(f'https://huggingface.co/buckets/{sheets.BUCKET}/resolve/{path}', timeout=120))
     except Exception: return None
 def manifest(product): return bucket_json(f'{product}/manifest.json')
-def deployed_files(report): return max(1, report['files'] - 1)        # glb + sheet tileset.json; report.json is not deployed
+def deployed_files(report): return report['files']                    # glb + sheet tileset.json (report.json is not in `files` and not deployed)
 
 # ---- the shard map -------------------------------------------------------------------------------------------------------------
 def load_map(): return json.load(open(SHARDS)) if os.path.exists(SHARDS) else {'max_files': MAX_FILES, 'products': {}}
@@ -107,7 +110,9 @@ def stage_shard(product, n, out, workers=8):
 
 def project_records():
     out = {}
-    for f in list_bucket_tree(sheets.BUCKET, prefix='pages/projects/'):
+    try: tree = list(list_bucket_tree(sheets.BUCKET, prefix='pages/projects/'))
+    except Exception: return out                                  # nothing recorded yet
+    for f in tree:
         p = getattr(f, 'path', '')
         if p.endswith('.json'):
             j = bucket_json(p)
@@ -116,7 +121,9 @@ def project_records():
 
 def state_records():
     out = {}
-    for f in list_bucket_tree(sheets.BUCKET, prefix='pages/state/'):
+    try: tree = list(list_bucket_tree(sheets.BUCKET, prefix='pages/state/'))
+    except Exception: return out
+    for f in tree:
         p = getattr(f, 'path', '')
         if p.endswith('.json'):
             j = bucket_json(p)

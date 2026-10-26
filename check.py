@@ -25,7 +25,7 @@ assert [c['children'][0]['content']['uri'] for c in t['root']['children']] == ['
 assert publish.root_tileset('x', {}) is None
 import pages                                                          # shard map: stable, capacity-bound, headers within Pages limits
 m = {'max_files': 10, 'products': {}}
-r = lambda n: {'files': n + 1}
+r = lambda n: {'files': n}
 assert pages.assign(m, 'p', {'a': r(6), 'b': r(3), 'c': r(5)}, ['c', 'a']) == 3
 assert {n: list(d['sheets']) for n, d in m['products']['p'].items()} == {'01': ['c'], '02': ['a', 'b']}
 assert pages.assign(m, 'p', {'a': r(6), 'b': r(3), 'c': r(5), 'd': r(2)}, ['c', 'a']) == 1
