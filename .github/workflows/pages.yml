@@ -40,18 +40,28 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          code=$(curl -s -o /tmp/verify.json -w '%{http_code}' -H "$auth" https://api.cloudflare.com/client/v4/user/tokens/verify)
-          echo "token verify: HTTP $code, status: $(python3 -c "import json;d=json.load(open('/tmp/verify.json'));print(d.get('result',{}).get('status'), d.get('success'))" 2>/dev/null)"
-          code=$(curl -s -o /tmp/projects.json -w '%{http_code}' -H "$auth" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects?per_page=100")
-          echo "Pages projects list: HTTP $code"
-          python3 - <<'PY'
+          api=https://api.cloudflare.com/client/v4
+          for kind in account user; do      # an account-owned token verifies on the account endpoint, a user token on the user one
+            if [ $kind = account ]; then url="$api/accounts/$CLOUDFLARE_ACCOUNT_ID/tokens/verify"; else url="$api/user/tokens/verify"; fi
+            code=$(curl -s -o /tmp/verify.json -w '%{http_code}' -H "$auth" "$url")
+            echo "token verify ($kind endpoint): HTTP $code, status: $(python3 -c "import json;d=json.load(open('/tmp/verify.json'));print(d.get('result',{}).get('status'), d.get('success'))" 2>/dev/null)"
+            [ "$code" = 200 ] && break
+          done
+          : > /tmp/names.txt; page=1
+          while :; do
+            code=$(curl -s -o /tmp/projects.json -w '%{http_code}' -H "$auth" "$api/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects?page=$page")
+            echo "Pages projects list, page $page: HTTP $code"
+            python3 - <<'PY' || break
           import json
           d = json.load(open('/tmp/projects.json'))
-          print('success:', d.get('success'), '| errors:', [e.get('message') for e in d.get('errors', [])])
-          print('result_info:', d.get('result_info'))
-          names = sorted(p.get('name') for p in d.get('result') or [])
-          print(f'{len(names)} projects:', names)
+          print('success:', d.get('success'), '| errors:', [e.get('message') for e in d.get('errors', [])], '| result_info:', d.get('result_info'))
+          names = [p.get('name') for p in d.get('result') or []]
+          open('/tmp/names.txt', 'a').write('\n'.join(names) + ('\n' if names else ''))
+          raise SystemExit(0 if names and (d.get('result_info') or {}).get('count', 0) >= (d.get('result_info') or {}).get('per_page', 1) else 1)
           PY
+            page=$((page + 1))
+          done
+          echo "$(grep -c . /tmp/names.txt || true) Pages projects: $(sort /tmp/names.txt | tr '\n' ' ')"
   plan:
     if: github.event_name == 'workflow_dispatch' && inputs.mode != 'verify' || github.event_name == 'schedule' && vars.PAGES_ENABLED == 'true'
     runs-on: ubuntu-24.04
