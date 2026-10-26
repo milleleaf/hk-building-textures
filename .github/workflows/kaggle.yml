@@ -1,4 +1,4 @@
-# Kaggle archive (kaggle_product.py): ONE public dataset per product, milleleaf/hk-building-textures-<product> (owner input).
+# Kaggle archive (kaggle_product.py): ONE public dataset per product, helenkwok/hk-building-textures-<product> (owner input; Helen's one Kaggle account, branded Milleleaf in title and text).
 # Manual only, never on a timer: every run uploads the whole product as a new dataset version (a Kaggle version is exactly the
 # files of its upload folder). Needs the repo secret KAGGLE_API_TOKEN (Helen's token, placed by her; it does not exist yet).
 name: kaggle
@@ -10,7 +10,7 @@ on:
         options: [indiv-k4, bake3dsd]
       owner:
         description: 'Kaggle owner of the dataset (a user or organization that exists)'
-        default: 'milleleaf'
+        default: 'helenkwok'
       dry:
         description: 'Stage and list only: no Kaggle call'
         type: boolean

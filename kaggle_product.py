@@ -1,5 +1,5 @@
 """Kaggle archive of one product: ONE public dataset per product (Helen, 2026-10-25), id <owner>/hk-building-textures-<product>,
-owner from KAGGLE_OWNER (default milleleaf). Manual only (workflow `kaggle`); needs KAGGLE_API_TOKEN, never run by CI on a timer.
+owner from KAGGLE_OWNER (default helenkwok, Helen's one Kaggle account, as for hk-transit). Manual only (workflow `kaggle`); needs KAGGLE_API_TOKEN, never run by CI on a timer.
 Layout on Kaggle: <map>/<sheet>/... where <map> is the 1:20,000 map number (1..17), so there are 17 top-level folders plus
 tileset.json and manifest.json (Kaggle allows 50 top-level files; each folder goes up as a zip that Kaggle unpacks). The root
 tileset.json is rebuilt with <map>/<sheet>/tileset.json uris. The bucket's failed-<run>.json attempt records are not mirrored.
@@ -12,7 +12,7 @@ import json, os, shutil, sys, urllib.request
 from huggingface_hub import sync_bucket
 import kaggle_mirror, publish, sheets
 
-OWNER = os.environ.get('KAGGLE_OWNER', 'milleleaf')
+OWNER = os.environ.get('KAGGLE_OWNER', 'helenkwok')
 WHAT = {'indiv-k4': ("Lands Department's own Individualised models (one glTF per building, photo textures), textures re-encoded as KTX2 ETC1S at 1/4 size, "
                      "geometry meshopt-compressed, in 150 m cells (desktop)"),
         'bake3dsd': ("Lands Department's 3D Spatial Data building models, each with a texture atlas baked from the Open3Dhk photomesh at 20 cm texels "
