@@ -23,6 +23,18 @@ import publish
 t = publish.root_tileset('x', {'11-NW-19B': {'buildings': 2, 'region': [0, 0, 1, 1, 0, 9]}, '11-NW-19A': {'buildings': 0}, '12-SE-1A': {'buildings': 1, 'region': [2, 2, 3, 3, -1, 5]}})
 assert [c['children'][0]['content']['uri'] for c in t['root']['children']] == ['11-NW-19B/tileset.json', '12-SE-1A/tileset.json'] and t['root']['boundingVolume']['region'] == [0, 0, 3, 3, -1, 9]
 assert publish.root_tileset('x', {}) is None
+import zipcut, urllib.error, io                                       # Lands D 403s any Range request that crosses byte 2^31 of a zip (probed 2026-10-28)
+B31, seen = 1 << 31, []
+def fake_urlopen(req, timeout=0):
+    a, b = (int(x) for x in req.headers['Range'].split('=')[1].split('-')); seen.append((a, b))
+    if a // B31 != b // B31: raise urllib.error.HTTPError(req.full_url, 403, 'Forbidden', {}, io.BytesIO(b''))
+    return type('R', (), {'status': 206, 'headers': {}, 'read': lambda self: bytes((a + k) % 251 for k in range(b - a + 1))})()
+zipcut.urllib.request.urlopen, zipcut.TRIES, zipcut.PAUSE, zipcut.backoff = fake_urlopen, 1, 0, lambda i, e: None
+for a, b in ((B31 - 100, B31 + 99), (2 * B31 - 7, 2 * B31 + 8), (B31, B31 + 50), (B31 - 60, B31 - 1), (0, 99)):
+    seen.clear(); got = zipcut.rng('https://example.invalid/z.zip', a, b)
+    assert got == bytes(k % 251 for k in range(a, b + 1)), (a, b)          # the right bytes, in order
+    assert all(x // B31 == y // B31 for x, y in seen), (a, b, seen)        # and no request crossed a multiple of 2^31
+assert len(seen) == 1 and zipcut.rng('https://example.invalid/z.zip', B31 - 100, B31 + 99) and len(seen) == 3       # a straddling span is two requests
 import pages                                                          # shard map: stable, capacity-bound, headers within Pages limits
 m = {'max_files': 10, 'products': {}}
 r = lambda n: {'files': n}

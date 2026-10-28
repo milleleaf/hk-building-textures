@@ -50,7 +50,16 @@ def saw403(url):
         except Exception as e: print(f'  could not write the stop marker: {e!r}', file=sys.stderr)
         raise Blocked(f'403 from Lands D at {fetched["first_403_utc"]} after {fetched["MB_before_403"]} MB: stopping (STOP_ON_403=1)')
 
+B31 = 1 << 31
+
 def rng(url, start, end):   # inclusive
+    """Lands D answers 403 to any Range request that crosses byte 2^31 (also 2^32, ...) of a zip (probed 2026-10-28: a 1 KB request straddling
+    2,147,483,648 got 403, one starting exactly there 206), so a span is cut at every multiple of 2^31 and the pieces are joined."""
+    cut = (start // B31 + 1) * B31
+    if end >= cut: return rng1(url, start, cut - 1) + rng(url, cut, end)
+    return rng1(url, start, end)
+
+def rng1(url, start, end):   # one request, inclusive
     req = urllib.request.Request(url, headers={'Range': f'bytes={start}-{end}', **UA})
     for i in range(TRIES):
         budget_check()
