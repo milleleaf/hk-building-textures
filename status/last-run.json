@@ -1,7 +1,7 @@
 {
- "utc": "2026-10-28T02:05:30Z",
- "run": "40618581936",
- "code": "17cdad96ffa04f3e5556686f1e7e246072ff4ed3",
+ "utc": "2026-10-28T02:41:35Z",
+ "run": "40619270870",
+ "code": "76e25ecac9565b86c60e504fe53874e0a223d1e6",
  "area": "cbd",
  "done": {
   "indiv-k4": 69,
@@ -15,30 +15,11 @@
   "indiv-k4": [],
   "bake3dsd": []
  },
- "MB_fetched_this_tick": 9.4,
+ "MB_fetched_this_tick": 1511.0,
  "budget_MB": 1500.0,
  "carried_over": {
   "product": "indiv-k4",
   "sheet": "11-NE-17C"
  },
- "landsd_403": {
-  "url": "https://download.map.gov.hk/api/3d-zip/GLTF/11-NE-17C.zip",
-  "requests": 3,
-  "bytes": 537272,
-  "http403": 1,
-  "first_403_utc": "2026-10-28T02:04:25Z",
-  "MB_before_403": 0.5,
-  "settings": {
-   "threads": 2,
-   "span_MB": 8.0,
-   "pause_s": 0.5,
-   "stop_on_403": true,
-   "key": "own"
-  },
-  "carryover_MB_at_start": 2224.4,
-  "cumulative_MB_this_dir": 2224.9,
-  "carryover_estimated": true,
-  "job": "tick",
-  "run": "40618581936"
- }
+ "landsd_403": null
 }
