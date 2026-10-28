@@ -1,0 +1,78 @@
+# Manual test of a branch's early publish on a SCRATCH bucket (never the real one): one indiv-k4 sheet with a small download budget, so it ends mid-sheet,
+# then the index step. Prints what landed on the scratch bucket. Own concurrency group: it must not queue behind or replace a cbd tick.
+name: early-test
+on:
+  workflow_dispatch:
+    inputs:
+      ref: {description: 'branch or commit to test', default: 'per-building-publish'}
+      sheet: {description: 'indiv-k4 sheet', default: '11-NW-19B'}
+      budget_mb: {description: 'Lands D download budget in MB (small: the sheet must end unfinished)', default: '120'}
+      bucket: {description: 'scratch bucket (private, created if missing)', default: 'milleleaf/hk-building-textures-scratch'}
+permissions:
+  contents: read
+concurrency:
+  group: early-test
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      WORK: /mnt/work
+      HKBT_BUCKET: ${{ inputs.bucket }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97   # v7.0.0
+        with:
+          python-version: '3.14'
+          cache: pip
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1   # v7.1.0
+        with:
+          node-version: '24.14.0'
+          cache: npm
+      - run: pip install -r requirements.txt && npm ci --ignore-scripts --no-audit --no-fund
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9   # v6.1.0
+        with:
+          path: ~/.cache/hkbt-ffmpeg
+          key: ffmpeg-3c2d43d9
+      - run: ./install-tools.sh
+      - name: scratch bucket
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          [ "$HKBT_BUCKET" != "milleleaf/hk-building-textures" ] || { echo "refusing: the real bucket"; exit 1; }
+          python -c "import os; from huggingface_hub import create_bucket; create_bucket(os.environ['HKBT_BUCKET'], private=True, exist_ok=True); print('bucket ok', os.environ['HKBT_BUCKET'])"
+          sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"
+      - name: sheet with early publish
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          LANDSD_KEY: ${{ secrets.LANDSD_KEY }}
+          NODE_OPTIONS: --max-old-space-size=12288
+          EARLY_PUBLISH: '1'
+          BUDGET_MB: ${{ inputs.budget_mb }}
+          BUDGET_FILE: /mnt/work/budget.json
+          ZIP_THREADS: '2'
+          ZIP_SPAN_MB: '8'
+          ZIP_PAUSE_S: '0.5'
+          STOP_ON_403: '1'
+        run: python sheet.py indiv-k4 "$WORK" "${{ inputs.sheet }}"
+      - name: index and report
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python publish.py indiv-k4 --no-card
+          python - <<'PY'
+          import json, os, tempfile
+          from huggingface_hub import download_bucket_files, get_bucket_paths_info
+          B, S = os.environ['HKBT_BUCKET'], '${{ inputs.sheet }}'
+          paths = [p.path for p in get_bucket_paths_info(B, [f'indiv-k4/{S}/partial.json', f'indiv-k4/{S}/report.json', f'indiv-k4/{S}/tileset.json', 'indiv-k4/tileset.json', 'indiv-k4/manifest.json'])]
+          print('on the scratch bucket:', paths)
+          d = tempfile.mkdtemp(); download_bucket_files(B, [(p, os.path.join(d, p)) for p in paths if p.endswith(('partial.json', 'manifest.json'))])
+          for p in paths:
+              f = os.path.join(d, p)
+              if os.path.exists(f):
+                  j = json.load(open(f)); print(p, {k: j[k] for k in j if k in ('partial', 'buildings', 'complete_buildings', 'files', 'bytes', 'sheets_published', 'sheets_partial')})
+          assert any(p.endswith('partial.json') for p in paths), 'no partial.json: early publish did not run'
+          assert not any(p.endswith('/report.json') for p in paths), 'report.json present: the sheet should still be unfinished'
+          PY
