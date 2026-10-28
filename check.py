@@ -47,3 +47,25 @@ n = {'uri': 'x.glb', 'children': [{'content': {'uri': 'sub/y.glb'}}]}; pages.ren
 assert n['uri'] == 'x-1.glb' and n['children'][0]['content']['uri'] == 'sub/y-2.glb'
 assert pages.project('indiv-k4', '01') == 'milleleaf-hkbt-indiv-k4-01' and len(pages.project('bake3dsd', '24')) < 58
 print(f'check: ok ({len(src)} sources)')
+
+# adaptive pace (zipcut.Pace): ramps up on good requests, halves on a slow or retried one, never leaves 1..ceiling, and a gate holds the allowance
+p = zipcut.Pace(6, 0.5)
+assert p.cur == 2
+for _ in range(8 * 5): p.ok(8_000_000, 1.0)                                  # steady 8 MB/s: +1 every 8 requests up to the ceiling
+assert p.cur == 6 and p.pause == 0.5 and p.stats['speedups'] == 4
+p.ok(8_000_000, 40.0); assert p.cur == 3 and p.pause == 1.0                  # one request at under 40% of the best speed: halve, double the pause
+p.slow(); assert p.cur == 1 and p.pause == 2.0; p.slow(); assert p.cur == 1 and p.pause == 4.0
+for _ in range(60): p.ok(8_000_000, 1.0)                                      # recovery: pause eases back, allowance climbs again
+assert p.cur >= 5 and p.pause == 0.5, (p.cur, p.pause)
+q = zipcut.Pace(4, 0, on=False); q.slow(); q.ok(1, 100); assert q.cur == 4 and q.stats['slowdowns'] == 0                # ZIP_ADAPTIVE=0: fixed pace
+import threading, time as _t                                                   # the gate: never more than `cur` requests inside at once
+g = zipcut.Pace(3, 0); g.cur = 2; inside, peak, lock = [0], [0], threading.Lock()
+def work():
+    g.enter()
+    with lock: inside[0] += 1; peak[0] = max(peak[0], inside[0])
+    _t.sleep(0.05)
+    with lock: inside[0] -= 1
+    g.leave()
+ts = [threading.Thread(target=work) for _ in range(8)]; [t.start() for t in ts]; [t.join() for t in ts]
+assert peak[0] == 2, peak
+print('adaptive pace checks passed')

@@ -20,7 +20,7 @@ THREADS = int(os.environ.get('ZIP_THREADS', 4)); SPAN = int(float(os.environ.get
 PAUSE = float(os.environ.get('ZIP_PAUSE_S', 0)); STOP = os.environ.get('STOP_ON_403') == '1'
 fetched = {'requests': 0, 'bytes': 0, 'http403': 0, 'first_403_utc': None, 'MB_before_403': None}
 PRIOR = {'bytes': 0, 'estimated': False}       # bytes already delivered to this out dir by earlier ticks (the carried-over folder), see run()
-SETTINGS = {'threads': THREADS, 'span_MB': SPAN / (1 << 20), 'pause_s': PAUSE, 'stop_on_403': STOP, 'key': 'own' if os.environ.get('LANDSD_KEY') else 'public'}
+SETTINGS = {'adaptive': os.environ.get('ZIP_ADAPTIVE', '1') != '0', 'threads': THREADS, 'span_MB': SPAN / (1 << 20), 'pause_s': PAUSE, 'stop_on_403': STOP, 'key': 'own' if os.environ.get('LANDSD_KEY') else 'public'}
 
 class Blocked(Exception): pass
 
@@ -36,6 +36,36 @@ def budget_add(n):
     with _block:
         _spent[0] += n
         if BUDGET_FILE: json.dump({'bytes': _spent0 + _spent[0]}, open(BUDGET_FILE, 'w'))
+
+class Pace:
+    """Adaptive request pace (AIMD, like a video player's bitrate): starts at 2 requests at once (or THREADS if fewer), adds one after
+    8 requests in a row that ran at 40% of the best recent speed or better, halves the allowance on a request that ran under 40% of it, or
+    failed and was retried, and doubles the pause after each request (up to 5 s) while slowed, easing back as it recovers. ZIP_THREADS is
+    the ceiling; ZIP_ADAPTIVE=0 switches this off (the fixed pace). A 403 still stops everything (STOP_ON_403): this only reacts earlier."""
+    def __init__(s, ceiling, pause, on=True):
+        s.max, s.base, s.on = max(1, ceiling), pause, on; s.cur = min(2, s.max) if on else s.max; s.pause = pause; s.active = 0; s.good = 0; s.best = 0.0
+        s.cond = threading.Condition(); s.stats = {'min_at_once': s.cur, 'max_at_once': s.cur, 'slowdowns': 0, 'speedups': 0}
+    def enter(s):
+        with s.cond:
+            while s.active >= s.cur: s.cond.wait()
+            s.active += 1
+    def leave(s):
+        with s.cond: s.active -= 1; s.cond.notify_all()
+    def ok(s, nbytes, secs):
+        if not s.on: return
+        with s.cond:
+            v = nbytes / max(secs, 1e-3); s.best = max(v, s.best * 0.98) if s.best else v
+            if v < 0.4 * s.best: s._slow()
+            else:
+                s.good += 1; s.pause = max(s.base, s.pause / 2)
+                if s.good >= 8 and s.cur < s.max: s.cur += 1; s.good = 0; s.stats['speedups'] += 1; s.stats['max_at_once'] = max(s.stats['max_at_once'], s.cur); s.cond.notify_all()
+    def slow(s):                                    # a request failed and is being retried
+        if s.on:
+            with s.cond: s._slow()
+    def _slow(s):
+        s.good = 0; s.pause = min(5.0, max(s.base, s.pause) * 2 or 0.5); s.stats['slowdowns'] += 1
+        if s.cur > 1: s.cur = max(1, s.cur // 2); s.stats['min_at_once'] = min(s.stats['min_at_once'], s.cur)
+PACE = Pace(THREADS, PAUSE, os.environ.get('ZIP_ADAPTIVE', '1') != '0')
 
 def saw403(url):
     fetched['http403'] += 1
@@ -64,16 +94,20 @@ def rng1(url, start, end):   # one request, inclusive
     for i in range(TRIES):
         budget_check()
         try:
-            r = urllib.request.urlopen(req, timeout=300)
-            if r.status != 206: raise RuntimeError(f'no range support: HTTP {r.status}')
-            b = r.read()
+            PACE.enter(); t0 = time.time()
+            try:
+                r = urllib.request.urlopen(req, timeout=300)
+                if r.status != 206: raise RuntimeError(f'no range support: HTTP {r.status}')
+                b = r.read()
+            finally: PACE.leave()
             if len(b) != end - start + 1: raise IOError(f'short read {len(b)} of {end - start + 1}')
-            fetched['requests'] += 1; fetched['bytes'] += len(b); budget_add(len(b))
-            if PAUSE: time.sleep(PAUSE)
+            fetched['requests'] += 1; fetched['bytes'] += len(b); budget_add(len(b)); PACE.ok(len(b), time.time() - t0)
+            if PACE.pause: time.sleep(PACE.pause)
             return b
         except (RuntimeError, Blocked, OverBudget): raise
         except Exception as e:
             if getattr(e, 'code', None) == 403: saw403(url)
+            PACE.slow()
             if i == TRIES - 1: raise
             backoff(i, e)
 
@@ -225,7 +259,7 @@ def run(a):
     finally:
         total = PRIOR['bytes'] + fetched['bytes']; json.dump({'bytes': total, 'estimated': PRIOR['estimated']}, open(tf, 'w'))
         f = {**SETTINGS, **fetched, 'MB': round(fetched['bytes'] / 1e6, 1), 'error': err, 'carryover_MB_at_start': round(PRIOR['bytes'] / 1e6, 1),
-             'cumulative_MB_this_dir': round(total / 1e6, 1), 'carryover_estimated': PRIOR['estimated']}; f.pop('bytes')
+             'cumulative_MB_this_dir': round(total / 1e6, 1), 'carryover_estimated': PRIOR['estimated'], 'pace': PACE.stats}; f.pop('bytes')
         json.dump({'fetch': f, 'sheets': report}, open(os.path.join(pos[1], f'zipcut-{pos[0]}.json'), 'w'), indent=1)
     if over: print(f'  {err}: stopping, fetched members stay on disk', file=sys.stderr); sys.exit(75)
     if blocked: print(f'  {err}', file=sys.stderr); sys.exit(76)          # a Lands D 403 with STOP_ON_403: the caller stops everything
