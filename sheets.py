@@ -11,7 +11,7 @@ from shapely.geometry import Polygon, Point, box
 CSDI = 'https://portal.csdi.gov.hk/server/rest/services/common'
 INDEX = {'indiv-k4': f'{CSDI}/landsd_rcd_1671676915450_88604/FeatureServer/0', 'bake3dsd': f'{CSDI}/landsd_rcd_1671677054006_62261/FeatureServer/0'}
 BUILDINGS = f'{CSDI}/landsd_rcd_1637211194312_35158/MapServer/0'
-BUCKET = 'milleleaf/hk-building-textures'
+BUCKET = os.environ.get('HKBT_BUCKET') or 'milleleaf/hk-building-textures'   # HKBT_BUCKET: a scratch bucket for testing a branch
 UA = {'User-Agent': 'milleleaf-hk-building-textures'}
 
 def query(url, **q):
