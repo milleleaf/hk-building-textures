@@ -29,6 +29,40 @@ def budget_spent():
     f, b = os.environ.get('BUDGET_FILE'), float(os.environ.get('BUDGET_MB') or 0) * 1e6
     return bool(b and f and os.path.exists(f) and json.load(open(f)).get('bytes', 0) >= b)
 
+EARLY = os.environ.get('EARLY_PUBLISH') == '1'      # indiv-k4: when the download budget ends mid-sheet, convert and publish the buildings already complete on disk
+
+def complete_buildings(zipdir):
+    """ids under <zipdir>/BUILDING/ whose .gltf and every file it names (images, buffers) are on disk: zipcut writes each member whole or not at all"""
+    root, ok = os.path.join(zipdir, 'BUILDING'), []
+    for i in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        f = os.path.join(root, i, f'{i}.gltf')
+        if not os.path.exists(f): continue
+        try: j = json.load(open(f, encoding='utf-8'))
+        except ValueError: continue
+        uris = [x['uri'] for x in (j.get('images') or []) + (j.get('buffers') or []) if x.get('uri') and not x['uri'].startswith('data:')]
+        if all(os.path.exists(os.path.join(root, i, u)) for u in uris): ok.append(i)
+    return ok
+
+def early_publish(product, d, sheet, times):
+    """the sheet is unfinished (budget spent): publish its complete buildings as a partial sheet (<product>/<sheet>/ files + partial.json, never report.json, so the
+    sheet stays unpublished in the planner and the next job continues it). Skipped when the sheet is already published or fewer than 20 buildings are complete."""
+    if sheets.published(product, [sheet]): return
+    ids = complete_buildings(os.path.join(d, 'zip', sheet))
+    if len(ids) < 20: return
+    stage, out = os.path.join(d, 'stage'), os.path.join(d, 'out-partial'); shutil.rmtree(stage, ignore_errors=True); shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(os.path.join(stage, 'BUILDING'))
+    for i in ids: os.symlink(os.path.abspath(os.path.join(d, 'zip', sheet, 'BUILDING', i)), os.path.join(stage, 'BUILDING', i))
+    step(times, 'convert_partial', ['node', 'indiv.mjs', out, stage, '--tex', 'ktx2:4', '--ge', '40'])
+    r = json.load(open(os.path.join(out, 'report.json'))); os.remove(os.path.join(out, 'report.json'))
+    if not r['buildings']: return
+    files = os.listdir(out); rep = {'product': product, 'sheet': sheet, 'partial': True, 'complete_buildings': len(ids), 'buildings': r['buildings'], 'files': len(files),
+                                    'bytes': sum(os.path.getsize(os.path.join(out, f)) for f in files), 'convert': r, 'code': sheets.code(),
+                                    'region': region(product, sheet, out), 'utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+    from huggingface_hub import batch_bucket_files, create_bucket, sync_bucket
+    create_bucket(sheets.BUCKET, private=False, exist_ok=True); sync_bucket(out, f'hf://buckets/{sheets.BUCKET}/{product}/{sheet}', delete=True, quiet=True)
+    batch_bucket_files(sheets.BUCKET, add=[(json.dumps(rep, indent=1).encode(), f'{product}/{sheet}/partial.json')])
+    print(f'PARTIAL {sheet}: {rep["buildings"]} of the sheet\'s buildings published, the rest is still being fetched', flush=True)
+
 def region(product, sheet, out):
     """region for the root tileset: the sheet's bbox grown ~200 m, heights from the sheet tileset's root"""
     ts = json.load(open(os.path.join(out, 'tileset.json')))['root']['boundingVolume']
@@ -42,7 +76,12 @@ def build(product, work, sheet):
     if budget_spent(): raise Unfinished('budget spent before the sheet started')   # keeps any carried-over files
     rev = sheets.index(product)[sheet]['rev']; rep = {'product': product, 'sheet': sheet, 'rev': rev, 'code': sheets.code()}
     if product == 'indiv-k4':
-        step(times, 'fetch', [*PY, 'zipcut.py', 'GLTF', os.path.join(d, 'zip'), sheet, '--prefix', 'BUILDING/'])
+        try: step(times, 'fetch', [*PY, 'zipcut.py', 'GLTF', os.path.join(d, 'zip'), sheet, '--prefix', 'BUILDING/'])
+        except Unfinished:
+            if EARLY and product == 'indiv-k4':
+                try: early_publish(product, d, sheet, times)
+                except Exception as e: print(f'early publish of {sheet} failed (the sheet carries on): {e!r}', flush=True)
+            raise
         z = json.load(open(os.path.join(d, 'zip', 'zipcut-GLTF.json'))); rep['fetch'] = z['fetch']; rep['zipcut'] = z['sheets'][sheet]
         if not os.path.isdir(os.path.join(d, 'zip', sheet, 'BUILDING')): rep['buildings'] = 0
         else:

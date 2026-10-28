@@ -13,11 +13,16 @@ UP = {'indiv-k4': 'Y', 'bake3dsd': 'Z', 'x': 'Y'}
 SHEET_GE = 60      # a sheet's tileset.json loads within ~3.5 km (sse 16, 1080 px, 60 deg fov); its own cells decide the rest
 
 def reports(product):
-    idx = sheets.index(product); paths = [f'{product}/{s}/report.json' for s in sorted(idx)]
+    """{sheet: report}; a sheet published only in part (partial.json, no report.json: sheet.py EARLY_PUBLISH, its finished buildings while the rest are
+    still being fetched) is listed with its partial.json, which carries "partial": true"""
+    idx = sheets.index(product); paths = [f'{product}/{s}/report.json' for s in sorted(idx)] + [f'{product}/{s}/partial.json' for s in sorted(idx)]
     have = [p.path for p in get_bucket_paths_info(sheets.BUCKET, paths)]
     with tempfile.TemporaryDirectory() as d:
         download_bucket_files(sheets.BUCKET, [(p, os.path.join(d, p)) for p in have])
-        return {p.split('/')[1]: json.load(open(os.path.join(d, p))) for p in have}
+        out = {}
+        for p in sorted(have, key=lambda x: x.endswith('partial.json')):      # report.json first: it wins over a stale partial.json
+            out.setdefault(p.split('/')[1], json.load(open(os.path.join(d, p))))
+        return out
 
 def union(rs): return [min(r[0] for r in rs), min(r[1] for r in rs), max(r[2] for r in rs), max(r[3] for r in rs), min(r[4] for r in rs), max(r[5] for r in rs)]
 
@@ -38,7 +43,7 @@ def main(products, card=True):
     for product in products:
         reps = reports(product); ts = root_tileset(product, reps); n = len(sheets.index(product))
         tot = lambda k: sum(r.get(k) or 0 for r in reps.values())
-        man = {'built': built, 'product': product, 'sheets_in_index': n, 'sheets_published': len(reps), 'sheets_with_buildings': sum(1 for r in reps.values() if r.get('buildings')),
+        man = {'built': built, 'product': product, 'sheets_in_index': n, 'sheets_published': sum(1 for r in reps.values() if not r.get('partial')), 'sheets_partial': sum(1 for r in reps.values() if r.get('partial')), 'sheets_with_buildings': sum(1 for r in reps.values() if r.get('buildings')),
                'buildings': tot('buildings'), 'files': tot('files'), 'bytes': tot('bytes'), 'sources': json.load(open(os.path.join(HERE, 'sources.json'))), 'sheets': reps}
         add = [(json.dumps(man, indent=1).encode(), f'{product}/manifest.json')]
         if ts: add.insert(0, (json.dumps(ts).encode(), f'{product}/tileset.json'))

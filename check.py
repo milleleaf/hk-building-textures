@@ -69,3 +69,20 @@ def work():
 ts = [threading.Thread(target=work) for _ in range(8)]; [t.start() for t in ts]; [t.join() for t in ts]
 assert peak[0] == 2, peak
 print('adaptive pace checks passed')
+
+# early publish (sheet.py): only buildings whose .gltf AND every file it names are on disk count as complete; a partial sheet is listed in the root tileset
+import os, tempfile, sheet as _sheet
+with tempfile.TemporaryDirectory() as t:
+    def bld(i, gltf, files=()):
+        os.makedirs(os.path.join(t, 'BUILDING', i)); open(os.path.join(t, 'BUILDING', i, f'{i}.gltf'), 'w').write(gltf)
+        for f in files: open(os.path.join(t, 'BUILDING', i, f), 'wb').write(b'x')
+    bld('A', json.dumps({'images': [{'uri': 'a.png'}], 'buffers': [{'uri': 'a.bin'}]}), ['a.png', 'a.bin'])        # complete
+    bld('B', json.dumps({'images': [{'uri': 'b.png'}], 'buffers': [{'uri': 'b.bin'}]}), ['b.bin'])                   # texture not fetched yet
+    bld('C', json.dumps({'buffers': [{'uri': 'data:application/octet-stream;base64,AAAA'}]}))                       # embedded data only: complete
+    bld('D', '{not json')                                                                                            # unreadable
+    os.makedirs(os.path.join(t, 'BUILDING', 'E'))                                                                    # no .gltf yet
+    assert _sheet.complete_buildings(t) == ['A', 'C'], _sheet.complete_buildings(t)
+    assert _sheet.complete_buildings(os.path.join(t, 'none')) == []
+ts = publish.root_tileset('indiv-k4', {'6-NE-1A': {'buildings': 3, 'region': [2.0, 0.39, 2.01, 0.4, 0, 100], 'partial': True}, '6-NE-1B': {'buildings': 0}})
+assert ts and ts['root']['children'][0]['children'][0]['content']['uri'] == '6-NE-1A/tileset.json' and len(ts['root']['children'][0]['children']) == 1
+print('early publish checks passed')

@@ -85,7 +85,7 @@ def rename_glbs(node, names):
 
 def stage_sheet(product, s, out, workers_dir):
     d = os.path.join(workers_dir, s)
-    sync_bucket(f'hf://buckets/{sheets.BUCKET}/{product}/{s}', d, exclude=['failed-*.json', 'report.json'], quiet=True)
+    sync_bucket(f'hf://buckets/{sheets.BUCKET}/{product}/{s}', d, exclude=['failed-*.json', 'report.json', 'partial.json'], quiet=True)
     dst = os.path.join(out, s); os.makedirs(dst, exist_ok=True); names = {}
     for f in sorted(os.listdir(d)):
         if f.endswith('.glb'):
