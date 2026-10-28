@@ -6,10 +6,13 @@ on:
     inputs:
       sheet:
         default: '11-NE-17C'
-      control_offset:
-        default: '100000000'
-      offset:
-        default: '2300000000'
+      offsets:
+        description: 'Comma-separated start offsets, one 1 KB Range request each, in this order'
+        default: '100000000,2300000000'
+      marker:
+        description: 'A 403 leaves the stop marker and ends the run (false: try every offset, leave the marker alone)'
+        type: boolean
+        default: true
 permissions:
   contents: read
 concurrency:
@@ -30,6 +33,6 @@ jobs:
           LANDSD_KEY: ${{ secrets.LANDSD_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           SHEET: ${{ inputs.sheet }}
-          CONTROL: ${{ inputs.control_offset }}
-          OFFSET: ${{ inputs.offset }}
-        run: python probe.py "$SHEET" "$CONTROL" "$OFFSET"
+          OFFSETS: ${{ inputs.offsets }}
+          PROBE_MARKER: ${{ inputs.marker && '1' || '0' }}
+        run: python probe.py "$SHEET" "$OFFSETS"

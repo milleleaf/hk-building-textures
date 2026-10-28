@@ -1,10 +1,12 @@
-"""One-off probe of Lands D (Helen approved it 2026-10-25): is a Range request into a zip past 2 GiB refused?
-Two requests, no retries: a 1 KB control at a small offset, then 1 KB at a given offset, both on the same GLTF zip.
-Prints status codes and Content-Range only, never the URL (it carries the key). On a 403 it leaves the stop marker and exits 76.
-usage: LANDSD_KEY=... python3 probe.py <sheet> <control offset> <offset>"""
+"""One-off probe of Lands D (Helen approved it): which 1 KB Range requests does it refuse on one GLTF zip?
+No retries. Prints status codes and Content-Range only, never the URL (it carries the key). Each offset is one request for bytes
+off..off+1023, in the order given. With PROBE_MARKER=1 (default) a 403 leaves the stop marker and ends the run (exit 76); with
+PROBE_MARKER=0 every offset is tried, the marker is left alone, and the run exits 0.
+usage: LANDSD_KEY=... python3 probe.py <sheet> <offset>[,<offset>...]"""
 import json, os, sys, time, urllib.request
-sheet, control, offset = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+sheet, offsets = sys.argv[1], [int(x) for x in sys.argv[2].split(',')]
 url = f'https://download.map.gov.hk/api/3d-zip/GLTF/{sheet}.zip?key={os.environ["LANDSD_KEY"]}'
+marker = os.environ.get('PROBE_MARKER', '1') == '1'
 
 def one(off):
     req = urllib.request.Request(url, headers={'Range': f'bytes={off}-{off + 1023}', 'User-Agent': 'milleleaf-hk-building-textures'})
@@ -13,10 +15,10 @@ def one(off):
     except urllib.error.HTTPError as e: return e.code, None, 0
     except Exception as e: return type(e).__name__, None, 0       # not the message: it can carry the URL
 
-for name, off in [x for x in (('control', control), ('past 2 GiB', offset)) if x[1] >= 0]:       # a negative offset skips that request
+for off in offsets:
     status, cr, n = one(off)
-    print(f'{name}: offset {off} -> HTTP {status}, Content-Range {cr}, {n} bytes', flush=True)
-    if status == 403:
+    print(f'offset {off} (bytes {off}-{off + 1023}) -> HTTP {status}, Content-Range {cr}, {n} bytes', flush=True)
+    if status == 403 and marker:
         from huggingface_hub import batch_bucket_files
         batch_bucket_files('milleleaf/hk-building-textures', add=[(json.dumps({'url': f'https://download.map.gov.hk/api/3d-zip/GLTF/{sheet}.zip', 'probe_offset': off,
             'http403': 1, 'first_403_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'run': os.environ.get('GITHUB_RUN_ID'), 'settings': {'key': 'own', 'tool': 'probe'}}).encode(), 'stop/landsd-403.json')])
