@@ -13,7 +13,7 @@ def one(off):
     except urllib.error.HTTPError as e: return e.code, None, 0
     except Exception as e: return type(e).__name__, None, 0       # not the message: it can carry the URL
 
-for name, off in (('control', control), ('past 2 GiB', offset)):
+for name, off in [x for x in (('control', control), ('past 2 GiB', offset)) if x[1] >= 0]:       # a negative offset skips that request
     status, cr, n = one(off)
     print(f'{name}: offset {off} -> HTTP {status}, Content-Range {cr}, {n} bytes', flush=True)
     if status == 403:

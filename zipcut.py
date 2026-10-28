@@ -19,6 +19,7 @@ UA = {'User-Agent': 'milleleaf-hk-building-textures'}
 THREADS = int(os.environ.get('ZIP_THREADS', 4)); SPAN = int(float(os.environ.get('ZIP_SPAN_MB', 32)) * (1 << 20)); GAP, TRIES = 1 << 20, 16
 PAUSE = float(os.environ.get('ZIP_PAUSE_S', 0)); STOP = os.environ.get('STOP_ON_403') == '1'
 fetched = {'requests': 0, 'bytes': 0, 'http403': 0, 'first_403_utc': None, 'MB_before_403': None}
+PRIOR = {'bytes': 0, 'estimated': False}       # bytes already delivered to this out dir by earlier ticks (the carried-over folder), see run()
 SETTINGS = {'threads': THREADS, 'span_MB': SPAN / (1 << 20), 'pause_s': PAUSE, 'stop_on_403': STOP, 'key': 'own' if os.environ.get('LANDSD_KEY') else 'public'}
 
 class Blocked(Exception): pass
@@ -44,6 +45,7 @@ def saw403(url):
         try:
             from huggingface_hub import batch_bucket_files
             batch_bucket_files('milleleaf/hk-building-textures', add=[(json.dumps({'url': url.split('?')[0], **fetched, 'settings': SETTINGS,
+                               'carryover_MB_at_start': round(PRIOR['bytes'] / 1e6, 1), 'cumulative_MB_this_dir': round((PRIOR['bytes'] + fetched['bytes']) / 1e6, 1), 'carryover_estimated': PRIOR['estimated'],
                                'job': os.environ.get('GITHUB_JOB'), 'run': os.environ.get('GITHUB_RUN_ID')}).encode(), 'stop/landsd-403.json')])
         except Exception as e: print(f'  could not write the stop marker: {e!r}', file=sys.stderr)
         raise Blocked(f'403 from Lands D at {fetched["first_403_utc"]} after {fetched["MB_before_403"]} MB: stopping (STOP_ON_403=1)')
@@ -202,12 +204,19 @@ def run(a):
     """main(), writing <out>/zipcut-<kind>.json {fetch: settings + totals + 403s, sheets: {...}} also when it fails"""
     flags = {'--prefix', '--near', '--pad'}; pos = [x for i, x in enumerate(a) if x not in flags and (i == 0 or a[i - 1] not in flags)]
     os.makedirs(pos[1], exist_ok=True); report, err, over, blocked = {}, None, False, False
+    tf = os.path.join(pos[1], 'zip-total.json')                       # running total of bytes fetched into this folder across ticks (it is carried over with the folder)
+    if os.path.exists(tf): PRIOR.update(json.load(open(tf)))
+    else:                                                                # a folder carried over before this file existed: what is on disk is the best estimate
+        have = sum(os.path.getsize(os.path.join(r, x)) for r, _, fs in os.walk(pos[1]) for x in fs)
+        PRIOR.update(bytes=have, estimated=have > 0)
     try: report = main(a)
     except OverBudget as e: err = repr(e); over = True
     except Blocked as e: err = repr(e); blocked = True
     except Exception as e: err = repr(e); raise
     finally:
-        f = {**SETTINGS, **fetched, 'MB': round(fetched['bytes'] / 1e6, 1), 'error': err}; f.pop('bytes')
+        total = PRIOR['bytes'] + fetched['bytes']; json.dump({'bytes': total, 'estimated': PRIOR['estimated']}, open(tf, 'w'))
+        f = {**SETTINGS, **fetched, 'MB': round(fetched['bytes'] / 1e6, 1), 'error': err, 'carryover_MB_at_start': round(PRIOR['bytes'] / 1e6, 1),
+             'cumulative_MB_this_dir': round(total / 1e6, 1), 'carryover_estimated': PRIOR['estimated']}; f.pop('bytes')
         json.dump({'fetch': f, 'sheets': report}, open(os.path.join(pos[1], f'zipcut-{pos[0]}.json'), 'w'), indent=1)
     if over: print(f'  {err}: stopping, fetched members stay on disk', file=sys.stderr); sys.exit(75)
     if blocked: print(f'  {err}', file=sys.stderr); sys.exit(76)          # a Lands D 403 with STOP_ON_403: the caller stops everything
