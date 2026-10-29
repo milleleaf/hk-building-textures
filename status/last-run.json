@@ -1,15 +1,15 @@
 {
- "utc": "2026-10-29T09:13:54Z",
- "run": "40840475642",
+ "utc": "2026-10-29T10:55:06Z",
+ "run": "40855714462",
  "code": "b77d3d3ab6fddb259f37d77c6abb616541a8dfd1",
  "area": "cbd",
  "done": {
   "indiv-k4": 71,
-  "bake3dsd": 11
+  "bake3dsd": 12
  },
  "left": {
   "indiv-k4": 0,
-  "bake3dsd": 60
+  "bake3dsd": 59
  },
  "failed_here": {
   "indiv-k4": [],
@@ -24,11 +24,11 @@
    "11-NE-23B"
   ]
  },
- "MB_fetched_this_tick": 1511.2,
+ "MB_fetched_this_tick": 1502.7,
  "budget_MB": 1500.0,
  "carried_over": {
   "product": "bake3dsd",
-  "sheet": "11-NE-23C"
+  "sheet": "11-NE-23D"
  },
  "landsd_403": null
 }
