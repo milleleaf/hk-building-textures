@@ -1,6 +1,6 @@
 {
- "utc": "2026-11-01T01:03:15Z",
- "run": "41256145703",
+ "utc": "2026-11-01T03:12:28Z",
+ "run": "41264630885",
  "code": "b77d3d3ab6fddb259f37d77c6abb616541a8dfd1",
  "area": "cbd",
  "done": {
@@ -44,14 +44,15 @@
    "11-SW-7D",
    "11-SW-8A",
    "11-SW-8B",
-   "11-SW-8C"
+   "11-SW-8C",
+   "11-SW-9C"
   ]
  },
- "MB_fetched_this_tick": 1504.3,
+ "MB_fetched_this_tick": 1505.7,
  "budget_MB": 1500.0,
  "carried_over": {
   "product": "bake3dsd",
-  "sheet": "11-SW-9C"
+  "sheet": "11-SW-9D"
  },
  "landsd_403": null
 }
