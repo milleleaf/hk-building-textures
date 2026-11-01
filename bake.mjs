@@ -20,7 +20,7 @@ import fs from 'node:fs'; import path from 'node:path'; import os from 'node:os'
 import * as THREE from 'three'
 import { Document } from '@gltf-transform/core'; import { KHRTextureBasisu, KHRMaterialsUnlit } from '@gltf-transform/extensions'
 import { meshopt } from '@gltf-transform/functions'; import { MeshoptEncoder } from 'meshoptimizer'
-import { C, enuFrame, mul, M4, readB3dm, listTilesets, tilesOf, decodeImage, encodeKtx2, io, QUIET } from './lib.mjs'
+import { C, enuFrame, mul, M4, readB3dm, unreadable, listTilesets, tilesOf, decodeImage, encodeKtx2, io, QUIET } from './lib.mjs'
 
 const a = process.argv.slice(2), opt = (f, d) => (a.includes(f) ? a[a.indexOf(f) + 1] : d)
 const [inDir, fpFile, outDir] = a
@@ -287,7 +287,8 @@ if (MESH) {
     const file = path.join(MESH, l.file), buf = fs.readFileSync(file); if (buf.length < 28) continue; tiles++
     const ftj = buf.readUInt32LE(12), ftb = buf.readUInt32LE(16), btj = buf.readUInt32LE(20)
     const inst = JSON.parse(buf.toString('utf8', 28 + ftj + ftb, 28 + ftj + ftb + btj)).extensions?.['3DTILES_batch_table_hierarchy']?.classes?.[0]?.instances || { names: [], component: [] }
-    const r = await readB3dm(file), T0 = mul(mul(E.Finv, M4(l.transform)), Y2Z)                 // tile frame (glTF Y-up) -> ENU
+    const r = await readB3dm(file); if (!r) continue                                           // unreadable tile: skipped and reported (see lib.mjs)
+    const T0 = mul(mul(E.Finv, M4(l.transform)), Y2Z)                                         // tile frame (glTF Y-up) -> ENU
     for (const node of r.doc.getRoot().listNodes()) { const mesh = node.getMesh(); if (!mesh) continue; const T = mul(T0, M4(node.getWorldMatrix()))
       for (const p of mesh.listPrimitives()) { const Pa = p.getAttribute('POSITION'), Ba = p.getAttribute('_BATCHID'), n = Pa.getCount(), q = [], v = new C.Cartesian3(), xyz = new Float64Array(3 * n)
         for (let i = 0; i < n; i++) { Pa.getElement(i, q); C.Matrix4.multiplyByPoint(T, C.Cartesian3.fromArray(q, 0, v), v); xyz[3 * i] = v.x; xyz[3 * i + 1] = v.y; xyz[3 * i + 2] = v.z + DZ }
@@ -473,7 +474,7 @@ if (DIAG) { fs.writeFileSync(path.join(outDir, 'diag.json'), JSON.stringify(D, n
 const rep = { buildings: res.length, outside_mesh: outsideMesh, failed: jobs.length - res.length - outsideMesh, skipped_no_height_or_low: skipped, texel_m: TEXEL, search_m: SEARCH, seconds: Math.round((Date.now() - t0) / 1000),
   MB: +(sum('bytes') / 1e6).toFixed(2), ms_per_building_median: res.map((r) => r.ms).sort((p, q) => p - q)[res.length >> 1], kB_per_building_median: Math.round(res.map((r) => r.bytes).sort((p, q) => p - q)[res.length >> 1] / 1e3),
   wall_nohit: +(sum('wallMiss') / sum('wallTexels')).toFixed(3), party_wall_share: +(sum('partyTexels') / sum('wallTexels')).toFixed(3), party_nohit: +(sum('partyMiss') / sum('partyTexels')).toFixed(3), street_wall_nohit: +((sum('wallMiss') - sum('partyMiss')) / (sum('wallTexels') - sum('partyTexels'))).toFixed(3), roof_nohit: +(sum('roofMiss') / sum('roofTexels')).toFixed(3), texels_M: +((sum('wallTexels') + sum('roofTexels')) / 1e6).toFixed(1), coarser_texel: res.filter((r) => r.texel_m > TEXEL).length }
-rep.veg_samples_dropped = vegDropped; rep.leaves = leaves.length; rep.leaves_missing = leavesMissing; rep.peak_rss_GB = +(peakRss / 1e9).toFixed(2)
+rep.veg_samples_dropped = vegDropped; rep.leaves = leaves.length; rep.leaves_missing = leavesMissing; rep.peak_rss_GB = +(peakRss / 1e9).toFixed(2); rep.tiles_unreadable = unreadable.length; rep.unreadable_tiles = unreadable.slice(0, 20)
 if (MESH) { const ms = res.filter((r) => r.mesh), med = (k) => ms.map((r) => r[k]).sort((p, q) => p - q)[ms.length >> 1], pct = (h, q) => { const n = h.reduce((x, y) => x + y, 0); let c = 0; for (let i = 0; i < h.length; i++) if ((c += h[i]) >= q * n) return -10 + (i + 0.5) * 0.25 }
   Object.assign(rep, { mesh: { ...meshInfo, baked: ms.length, outside_mesh: models.length - ms.length, MB: +(sum('bytes', ms) / 1e6).toFixed(2), MB_geometry_raw: +(sum('geomRaw', ms) / 1e6).toFixed(2), MB_geometry_meshopt: +(sum('geom', ms) / 1e6).toFixed(2), MB_texture: +(sum('ktx2', ms) / 1e6).toFixed(2),
     tris: sum('tris', ms), tris_degenerate_dropped: sum('trisDropped', ms), twin_tris_dropped: sum('twinsDropped', ms), charts: sum('charts', ms), charts_twin_dropped: sum('chartsDropped', ms), charts_tiny_lt_0_25m2: sum('tinyCharts', ms), charts_hidden: sum('hiddenCharts', ms), atlas_fill: +(sum('chartTexels', ms) / sum('atlasTexels', ms)).toFixed(3),

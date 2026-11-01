@@ -27,12 +27,15 @@ export const mul = (A, B) => C.Matrix4.multiply(A, B, new C.Matrix4())
 export const M4 = (a) => C.Matrix4.fromArray(a)
 export { C }
 
-/** b3dm -> { head (feature + batch tables, kept byte-exact), doc, rtc } */
+/** b3dm files Lands D ships that cannot be read (e.g. a GLB pointing at an external .bin it does not contain, seen 2026-10-30 on one building's
+ *  tiles of 3D Spatial Data): readB3dm returns null for them and lists them here; the report names them. One bad tile must not kill a sheet. */
+export const unreadable = []
+/** b3dm -> { head (feature + batch tables, kept byte-exact), doc, rtc }, or null when empty or unreadable */
 export async function readB3dm(file) {
   const b = fs.readFileSync(file); if (b.length < 28) return null                       // Lands D ships some 0-byte b3dm (DATA-ISSUES DI-10)
   const ftj = b.readUInt32LE(12), ftb = b.readUInt32LE(16), btj = b.readUInt32LE(20), btb = b.readUInt32LE(24), h = 28 + ftj + ftb + btj + btb
   const ft = ftj ? JSON.parse(b.toString('utf8', 28, 28 + ftj)) : {}
-  const doc = await io.readBinary(new Uint8Array(b.subarray(h))); doc.setLogger(QUIET)
+  let doc; try { doc = await io.readBinary(new Uint8Array(b.subarray(h))); doc.setLogger(QUIET) } catch (e) { unreadable.push({ tile: path.basename(file), error: String(e.message).slice(0, 90) }); console.error(`  UNREADABLE ${path.basename(file)}: ${e.message}`); return null }
   return { bytes: b.length, head: Buffer.from(b.subarray(0, h)), doc, rtc: ft.RTC_CENTER }
 }
 export async function writeB3dm(file, head, doc) {

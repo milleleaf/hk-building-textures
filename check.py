@@ -35,6 +35,11 @@ for a, b in ((B31 - 100, B31 + 99), (2 * B31 - 7, 2 * B31 + 8), (B31, B31 + 50),
     assert got == bytes(k % 251 for k in range(a, b + 1)), (a, b)          # the right bytes, in order
     assert all(x // B31 == y // B31 for x, y in seen), (a, b, seen)        # and no request crossed a multiple of 2^31
 assert len(seen) == 1 and zipcut.rng('https://example.invalid/z.zip', B31 - 100, B31 + 99) and len(seen) == 3       # a straddling span is two requests
+t = {'transform': [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], 'children': [                  # photomesh tiles: one without geometricError (it crashed 9 sheets), one leaf
+    {'content': {'uri': 'a.b3dm'}, 'boundingVolume': {'sphere': [0, 0, 0, 1]}, 'children': [{'content': {'uri': 'b.b3dm'}, 'boundingVolume': {'sphere': [0, 0, 0, 1]}}]},
+    {'content': {'uri': 'c.b3dm'}, 'geometricError': 0, 'boundingVolume': {'sphere': [0, 0, 0, 1]}}], 'boundingVolume': {'sphere': [0, 0, 0, 1]}, 'geometricError': 5}
+want, n = zipcut.leaves_near({'t/tileset.json': json.dumps({'root': t}).encode()}, lambda c, r: True)
+assert sorted(want) == ['t/b.b3dm', 't/c.b3dm'] and n == 2, (want, n)       # a has children and no geometricError: not a leaf; b has no children: a leaf
 import pages                                                          # shard map: stable, capacity-bound, headers within Pages limits
 m = {'max_files': 10, 'products': {}}
 r = lambda n: {'files': n}

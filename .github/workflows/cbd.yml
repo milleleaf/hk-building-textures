@@ -80,10 +80,15 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' -L https://huggingface.co/buckets/milleleaf/hk-building-textures/resolve/stop/landsd-403.json)
           if [ "$code" = 200 ]; then echo "stop marker on the bucket: nothing to do"; echo "stopped=1" >> "$GITHUB_OUTPUT"; exit 0; fi
           python sheets.py next "$AREA" $PRODUCTS > "$WORK/next.json"
-          python -c "import json;d=json.load(open('$WORK/next.json'));print({k:d[k] for k in ('product','left','done','failed_here')});print('product='+(d['product'] or ''));print('first='+(d['sheets'][0] if d['sheets'] else ''))" | tee -a /dev/stderr | grep -E '^(product|first)=' >> "$GITHUB_OUTPUT"
+          python -c "import json;d=json.load(open('$WORK/next.json'));print({k:d[k] for k in ('product','left','done','failed_here')});print('product='+(d['product'] or ''));print('first='+(d['sheets'][0] if d['sheets'] else ''));print('left='+str(sum(d['left'].values())))" | tee -a /dev/stderr | grep -E '^(product|first|left)=' >> "$GITHUB_OUTPUT"
+      # product is empty both when everything is published AND when every sheet left has failed with this code version; only the first
+      # may disable the schedule (2026-11-01: 34 failed sheets disabled it as "done"). Failed sheets are retried when the code changes.
       - name: 'all done - disable this schedule'
-        if: steps.next.outputs.stopped != '1' && steps.next.outputs.skip != '1' && steps.next.outputs.dry != '1' && steps.next.outputs.product == ''
+        if: steps.next.outputs.stopped != '1' && steps.next.outputs.skip != '1' && steps.next.outputs.dry != '1' && steps.next.outputs.product == '' && steps.next.outputs.left == '0'
         run: gh workflow disable cbd.yml --repo "$GITHUB_REPOSITORY" && echo "both CBD lists done, schedule disabled"
+      - name: 'sheets left, but every one failed with this code: wait for a fix'
+        if: steps.next.outputs.stopped != '1' && steps.next.outputs.skip != '1' && steps.next.outputs.dry != '1' && steps.next.outputs.product == '' && steps.next.outputs.left != '0'
+        run: echo "::warning::${{ steps.next.outputs.left }} sheets are left and every one failed with this code version (see failed_here in status/last-run.json). The schedule stays on and tries them again as soon as the code changes."
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1   # v7.1.0
         if: steps.next.outputs.product != ''
         with:

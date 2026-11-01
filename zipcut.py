@@ -209,7 +209,7 @@ def leaves_near(tss, wanted):
             nonlocal n
             M = mat(M, node['transform']) if 'transform' in node else M; u = (node.get('content') or {}).get('uri') or (node.get('content') or {}).get('url')
             kids = node.get('children') or []
-            if u and not u.endswith('.json') and (node['geometricError'] == 0 or not kids):
+            if u and not u.endswith('.json') and (node.get('geometricError') == 0 or not kids):      # a tile with no geometricError at all exists (11-NE-12D's neighbours): a leaf only if it has no children
                 n += 1; bv = node['boundingVolume']
                 if 'sphere' in bv: c, r = pt(M, bv['sphere'][:3]), bv['sphere'][3]
                 elif 'box' in bv: c, r = pt(M, bv['box'][:3]), math.hypot(*bv['box'][3:12])          # 11-NW-25B has box leaves
