@@ -1,6 +1,6 @@
 {
- "utc": "2026-11-01T10:53:36Z",
- "run": "41296960168",
+ "utc": "2026-11-01T13:22:58Z",
+ "run": "41310867242",
  "code": "b77d3d3ab6fddb259f37d77c6abb616541a8dfd1",
  "area": "cbd",
  "done": {
@@ -50,7 +50,7 @@
    "11-SW-9D"
   ]
  },
- "MB_fetched_this_tick": 1046.7,
+ "MB_fetched_this_tick": 0,
  "budget_MB": 1500.0,
  "carried_over": null,
  "landsd_403": null
