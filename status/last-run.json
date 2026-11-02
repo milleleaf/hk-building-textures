@@ -1,6 +1,6 @@
 {
- "utc": "2026-11-02T18:53:16Z",
- "run": "41497060942",
+ "utc": "2026-11-02T20:43:35Z",
+ "run": "41515838388",
  "code": "b05e48bdd07d739f3acffc3685746caaacd739e7",
  "area": "cbd",
  "done": {
@@ -15,7 +15,7 @@
   "indiv-k4": [],
   "bake3dsd": []
  },
- "MB_fetched_this_tick": 1511.7,
+ "MB_fetched_this_tick": 1503.9,
  "budget_MB": 1500.0,
  "carried_over": {
   "product": "bake3dsd",
