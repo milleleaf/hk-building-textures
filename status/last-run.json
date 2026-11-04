@@ -1,6 +1,6 @@
 {
- "utc": "2026-11-04T11:53:56Z",
- "run": "41818596126",
+ "utc": "2026-11-04T12:08:18Z",
+ "run": "41826548479",
  "code": "b05e48bdd07d739f3acffc3685746caaacd739e7",
  "area": "cbd",
  "done": {
@@ -15,7 +15,7 @@
   "indiv-k4": [],
   "bake3dsd": []
  },
- "MB_fetched_this_tick": 1194.1,
+ "MB_fetched_this_tick": 0,
  "budget_MB": 1500.0,
  "carried_over": null,
  "landsd_403": null
